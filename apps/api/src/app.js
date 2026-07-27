@@ -367,13 +367,19 @@ function registerRoomRoutes(app, db) {
 
   app.get('/api/reservations', requirePermission('rooms.read'), (_req,res)=>res.json(db.prepare(`SELECT rv.*,t.tenant_code,t.first_name,t.last_name,r.room_no,b.bed_no FROM reservations rv JOIN tenants t ON t.id=rv.tenant_id JOIN rooms r ON r.id=rv.room_id LEFT JOIN beds b ON b.id=rv.bed_id ORDER BY rv.id DESC`).all()))
   app.post('/api/reservations', requirePermission('rooms.manage'), (req,res,next)=>{try{
-    const b=validate(z.object({tenantId:idSchema,scope:z.enum(['bed','room']),roomId:idSchema,bedId:idSchema.nullable().optional(),startsAt:z.iso.date(),endsAt:z.iso.date().nullable().optional()}),req.body)
+    const b=validate(z.object({tenantId:idSchema,scope:z.enum(['bed','room']),rentalPeriod:z.enum(['daily','monthly','term','yearly']),roomId:idSchema,bedId:idSchema.nullable().optional(),startsAt:z.iso.date(),endsAt:z.iso.date().nullable().optional()}),req.body)
     const tenant=getById(db,'tenants',b.tenantId,'AND deleted_at IS NULL');if(!tenant)throw httpError(404,'TENANT_NOT_FOUND','ไม่พบผู้เช่า')
     const room=getById(db,'rooms',b.roomId);if(!room||room.readiness_status!=='ready'||['unavailable','damaged'].includes(room.status))throw httpError(409,'ROOM_NOT_READY','ห้องยังไม่พร้อมให้จอง')
     const targets=b.scope==='room'?db.prepare(`SELECT * FROM beds WHERE room_id=?`).all(b.roomId):[getById(db,'beds',b.bedId)]
     if(!targets.length||targets.some(x=>!x||x.room_id!==b.roomId||x.status!=='vacant'))throw httpError(409,'BED_UNAVAILABLE','ห้องหรือเตียงไม่ว่าง')
-    const policy=db.prepare(`SELECT * FROM rate_policies WHERE tenant_cohort=? AND active=1 AND starts_at<=? AND (ends_at IS NULL OR ends_at>=?) ORDER BY starts_at DESC LIMIT 1`).get(tenantRateCohort(tenant),b.startsAt,b.startsAt)
-    const id=transaction(db,()=>{const reservationNo=nextDocumentNo(db,'reservations','reservation_no','RSV');const result=db.prepare(`INSERT INTO reservations(reservation_no,tenant_id,room_id,bed_id,reservation_scope,starts_at,ends_at,condition_snapshot,created_by) VALUES (?,?,?,?,?,?,?,?,?)`).run(reservationNo,b.tenantId,b.roomId,b.scope==='bed'?b.bedId:null,b.scope,b.startsAt,b.endsAt||null,JSON.stringify({tenantType:tenant.tenant_type,cohort:tenantRateCohort(tenant),ratePolicyCode:policy?.code||null}),req.user.id);for(const bed of targets)db.prepare(`UPDATE beds SET status='reserved',tenant_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(b.tenantId,bed.id);return Number(result.lastInsertRowid)})
+    const cohort=tenantRateCohort(tenant),rateScope=b.scope==='room'?'room':'person'
+    const policy=db.prepare(`SELECT * FROM rate_policies WHERE tenant_cohort=? AND rental_period=? AND rate_scope=? AND active=1 AND starts_at<=? AND (ends_at IS NULL OR ends_at>=?) ORDER BY starts_at DESC LIMIT 1`).get(cohort,b.rentalPeriod,rateScope,b.startsAt,b.startsAt)
+    if(!policy)throw httpError(409,'RATE_POLICY_NOT_CONFIGURED','ไม่พบนโยบายค่าเช่าที่ตรงกับประเภทผู้เช่า รอบเช่า และรูปแบบการจอง')
+    const committed=db.prepare(`SELECT COUNT(*) count FROM beds WHERE room_id=? AND status IN ('reserved','occupied')`).get(b.roomId).count
+    const projectedOccupancy=b.scope==='room'?targets.length:committed+1
+    if(projectedOccupancy>policy.occupancy_limit)throw httpError(409,'OCCUPANCY_LIMIT','จำนวนผู้พักเกินเงื่อนไขของประเภทผู้เช่า')
+    const conditions={tenantType:tenant.tenant_type,cohort,rentalPeriod:b.rentalPeriod,rateScope,ratePolicyCode:policy.code,amount:policy.amount,occupancyLimit:policy.occupancy_limit,utilitySplitDivisor:policy.utility_split_divisor,depositAmount:policy.deposit_amount,dueDay:policy.due_day,lateFee:policy.late_fee}
+    const id=transaction(db,()=>{const reservationNo=nextDocumentNo(db,'reservations','reservation_no','RSV');const result=db.prepare(`INSERT INTO reservations(reservation_no,tenant_id,room_id,bed_id,reservation_scope,starts_at,ends_at,condition_snapshot,created_by) VALUES (?,?,?,?,?,?,?,?,?)`).run(reservationNo,b.tenantId,b.roomId,b.scope==='bed'?b.bedId:null,b.scope,b.startsAt,b.endsAt||null,JSON.stringify(conditions),req.user.id);for(const bed of targets)db.prepare(`UPDATE beds SET status='reserved',tenant_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(b.tenantId,bed.id);return Number(result.lastInsertRowid)})
     const after=getById(db,'reservations',id);writeAudit(db,req,{action:'RESERVE',entityType:'reservation',entityId:id,after});res.status(201).json(after)
   }catch(error){next(error)}})
 
@@ -398,7 +404,8 @@ function registerRoomRoutes(app, db) {
 
   app.post('/api/rooms/:id/readiness', requirePermission('rooms.manage'), (req,res,next)=>{try{
     const id=numberId(req),room=getById(db,'rooms',id);if(!room)throw httpError(404,'NOT_FOUND','ไม่พบห้อง')
-    const b=validate(z.object({ready:z.boolean(),checklist:z.record(z.string(),z.boolean()).default({}),note:z.string().max(1000).nullable().optional()}),req.body)
+    const b=validate(z.object({ready:z.boolean(),checklist:z.object({cleanliness:z.boolean(),electricity:z.boolean(),water:z.boolean(),furniture:z.boolean()}),note:z.string().max(1000).nullable().optional()}),req.body)
+    if(b.ready&&Object.values(b.checklist).some(value=>!value))throw httpError(400,'CHECKLIST_INCOMPLETE','ต้องยืนยันรายการตรวจความพร้อมให้ครบก่อนเปิดจอง')
     if(b.ready&&db.prepare(`SELECT COUNT(*) count FROM beds WHERE room_id=? AND status IN ('damaged','unavailable')`).get(id).count)throw httpError(409,'BED_NOT_READY','ยังมีเตียงชำรุดหรือไม่พร้อม')
     if(b.ready&&db.prepare(`SELECT COUNT(*) count FROM repairs WHERE room_id=? AND workflow_status NOT IN ('completed','closed')`).get(id).count)throw httpError(409,'OPEN_REPAIR','ยังมีงานซ่อมที่ไม่เสร็จ')
     const status=b.ready?'ready':'not_ready';transaction(db,()=>{db.prepare(`INSERT INTO room_inspections(room_id,readiness_status,checklist_json,note,confirmed_by) VALUES (?,?,?,?,?)`).run(id,status,JSON.stringify(b.checklist),b.note||null,req.user.id);db.prepare(`UPDATE rooms SET readiness_status=?,readiness_confirmed_at=CURRENT_TIMESTAMP,readiness_confirmed_by=?,status=CASE WHEN ?='ready' AND NOT EXISTS(SELECT 1 FROM beds WHERE room_id=? AND status='occupied') THEN 'vacant' ELSE status END,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(status,req.user.id,status,id,id)})
