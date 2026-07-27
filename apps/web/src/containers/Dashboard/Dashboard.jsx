@@ -9,6 +9,7 @@ import Inventory from '../Inventory/Inventory'
 import Administration from '../Administration/Administration'
 import MasterData from '../MasterData/MasterData'
 import RoomOperations from '../RoomOperations/RoomOperations'
+import MeterOperations from '../MeterOperations/MeterOperations'
 import ContractDesk from '../ContractDesk/ContractDesk'
 import Reports from '../Reports/Reports'
 import Announcements from '../Announcements/Announcements'
@@ -96,7 +97,8 @@ function Dashboard({ user, onLogout }) {
       <main className="mx-auto max-w-[1500px] p-4 md:p-7">
         {active === 'การเงิน' ? <Finance notify={notify} user={user} />
           : active === 'ข้อมูลพื้นฐาน' ? <MasterData notify={notify} user={user} />
-          : active === 'อาคารและห้องพัก' || active === 'มิเตอร์น้ำ–ไฟ' ? <RoomOperations notify={notify} />
+          : active === 'ห้องพัก' ? <RoomOperations notify={notify} />
+          : active === 'มิเตอร์น้ำ–ไฟ' ? <MeterOperations notify={notify} />
           : active === 'การจองและสัญญา' ? <ContractDesk user={user} notify={notify} />
           : active === 'Check-out และเงินประกัน' ? <CheckoutDesk notify={notify} />
           : active === 'ผู้เช่า' ? <Tenants notify={notify} />

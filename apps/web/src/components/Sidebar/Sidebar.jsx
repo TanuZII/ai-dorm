@@ -6,7 +6,7 @@ import {
 const navigationItems = [
   { label: 'ภาพรวม', icon: LayoutDashboard },
   { label: 'ข้อมูลพื้นฐาน', icon: Database },
-  { label: 'อาคารและห้องพัก', icon: Building2 },
+  { label: 'ห้องพัก', icon: Building2 },
   { label: 'ผู้เช่า', icon: Users },
   { label: 'การจองและสัญญา', icon: ClipboardList },
   { label: 'Check-out และเงินประกัน', icon: LogOut },
