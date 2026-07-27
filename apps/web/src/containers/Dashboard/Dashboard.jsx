@@ -104,8 +104,8 @@ function Dashboard({ user, onLogout }) {
           : active === 'สต็อก' ? <Inventory notify={notify} />
           : active === 'ประกาศ' ? <Announcements notify={notify} />
           : active === 'รายงาน' ? <Reports notify={notify} />
-          : active === 'ผู้ใช้และสิทธิ์' ? <Administration key="admin" notify={notify} />
-          : active === 'History Log' ? <Administration key="logs" notify={notify} initialTab="logs" />
+          : active === 'ผู้ใช้และสิทธิ์' ? <Administration key="admin" notify={notify} user={user} />
+          : active === 'History Log' ? <Administration key="logs" notify={notify} user={user} initialTab="logs" />
           : <>
         <section className="enter-up mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div><div className="mb-1 flex items-center gap-2 text-[11px] font-medium text-[#41749e]"><CalendarDays size={14}/> วันจันทร์ที่ 27 กรกฎาคม 2569</div><h2 className="text-[25px] font-semibold tracking-[-.02em] text-[#152c46] md:text-[30px]">สวัสดีตอนบ่าย, คุณสุภาวดี</h2><p className="mt-1 text-sm text-[#718291]">ภาพรวมการเข้าพักและรายการที่ต้องดูแลวันนี้</p></div>

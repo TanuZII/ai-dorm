@@ -65,6 +65,34 @@ test('critical dormitory backend flows', async (t) => {
     assert.ok(floors.body.some(item => item.code === 'PRAMOTE1-F1' && item.parent_name === 'อาคารปราโมทย์ 1'))
   })
 
+  await t.test('user groups, permissions, password tools and audit filters are manageable', async () => {
+    const permissions = await api('/permissions')
+    const usersRead = permissions.body.find(item => item.code === 'users.read')
+    const role = await api('/roles', { method: 'POST', body: { name: 'ผู้ตรวจสอบทดสอบ', description: 'กลุ่มสำหรับตรวจสอบการจัดการสิทธิ์', permissionIds: [usersRead.id] } })
+    assert.equal(role.response.status, 201)
+    const updatedRole = await api(`/roles/${role.body.id}`, { method: 'PATCH', body: { description: 'แก้ไขรายละเอียดกลุ่มแล้ว', permissionIds: [usersRead.id] } })
+    assert.equal(updatedRole.response.status, 200)
+    const createdUser = await api('/users', { method: 'POST', body: { username: 'auditor.test', displayName: 'ผู้ตรวจสอบระบบ', email: 'auditor@example.test', authSource: 'local', password: 'Auditor@123', roleIds: [role.body.id] } })
+    assert.equal(createdUser.response.status, 201)
+    const changedUser = await api(`/users/${createdUser.body.id}`, { method: 'PATCH', body: { displayName: 'ผู้ตรวจสอบระบบแก้ไข', roleIds: [role.body.id] } })
+    assert.equal(changedUser.response.status, 200)
+    const reset = await api(`/users/${createdUser.body.id}/reset-password`, { method: 'POST', body: { newPassword: 'Reset@1234' } })
+    assert.equal(reset.response.status, 204)
+    const auditorLogin = await api('/auth/login', { method: 'POST', body: { username: 'auditor.test', password: 'Reset@1234' } })
+    assert.equal(auditorLogin.response.status, 200)
+    token = auditorLogin.body.token
+    const changedPassword = await api('/auth/change-password', { method: 'POST', body: { currentPassword: 'Reset@1234', newPassword: 'Changed@1234' } })
+    assert.equal(changedPassword.response.status, 204)
+    const adminLogin = await api('/auth/login', { method: 'POST', body: { username: 'admin', password: 'Admin@1234' } })
+    token = adminLogin.body.token
+    const filteredLogs = await api('/audit-logs?actor=auditor.test&from=2020-01-01T00:00:00&to=2099-12-31T23:59:59')
+    assert.ok(filteredLogs.body.some(item => item.action === 'PASSWORD_CHANGED'))
+    const cancelledUser = await api(`/users/${createdUser.body.id}`, { method: 'DELETE', body: { reason: 'ยกเลิกบัญชีหลังจบการทดสอบระบบ' } })
+    assert.equal(cancelledUser.response.status, 204)
+    const cancelledRole = await api(`/roles/${role.body.id}`, { method: 'DELETE', body: { reason: 'ยกเลิกกลุ่มหลังจบการทดสอบระบบ' } })
+    assert.equal(cancelledRole.response.status, 204)
+  })
+
   let tenantId
   await t.test('create tenant and portal account with password policy', async () => {
     const created = await api('/tenants', { method: 'POST', body: { tenantCode: 'ST690001', tenantType: 'student', firstName: 'สมหญิง', lastName: 'เรียนดี', email: 'student@example.test', currentAddress: 'มหาวิทยาลัยตัวอย่าง' } })

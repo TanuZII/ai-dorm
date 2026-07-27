@@ -121,7 +121,7 @@ export function createApp(options = {}) {
 
   // Users, groups and permissions
   app.get('/api/users', requirePermission('users.read'), (req, res) => {
-    const rows = db.prepare(`SELECT id,username,display_name,email,auth_source,status,tenant_id,created_at,updated_at FROM users WHERE deleted_at IS NULL ORDER BY id DESC`).all()
+    const rows = db.prepare(`SELECT u.id,u.username,u.display_name,u.email,u.auth_source,u.status,u.tenant_id,u.created_at,u.updated_at,(SELECT a.created_at FROM audit_logs a WHERE a.actor_id=u.id AND a.action='LOGIN_SUCCESS' ORDER BY a.id DESC LIMIT 1) last_login_at FROM users u WHERE u.deleted_at IS NULL ORDER BY u.id DESC`).all()
     res.json(rows.map(row => ({ ...row, roles: db.prepare(`SELECT r.id,r.name FROM roles r JOIN user_roles ur ON ur.role_id=r.id WHERE ur.user_id=?`).all(row.id) })))
   })
   app.post('/api/users', requirePermission('users.manage'), async (req, res, next) => {
