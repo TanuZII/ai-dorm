@@ -278,6 +278,18 @@ test('critical dormitory backend flows', async (t) => {
     const signed = await api(`/contracts/${contract.body.id}/sign`, { method: 'POST', body: { password: 'Student@123', confirmed: true } })
     assert.equal(signed.response.status, 200)
     assert.equal(signed.body.document_status, 'signed')
+    assert.match(signed.body.invoice_no, /^INV-/)
+    const contractInvoice = db.prepare(`SELECT * FROM invoices WHERE contract_id=?`).get(contract.body.id)
+    assert.equal(contractInvoice.id, signed.body.invoice_id)
+    assert.equal(contractInvoice.due_date, '2026-08-01')
+    assert.equal(contractInvoice.total, 10000)
+    assert.deepEqual(db.prepare(`SELECT item_type,amount FROM invoice_items WHERE invoice_id=? ORDER BY item_type`).all(contractInvoice.id).map(row=>({...row})), [
+      { item_type: 'deposit', amount: 2000 },
+      { item_type: 'room', amount: 8000 },
+    ])
+    const duplicateSignature = await api(`/contracts/${contract.body.id}/sign`, { method: 'POST', body: { password: 'Student@123', confirmed: true } })
+    assert.equal(duplicateSignature.response.status, 409)
+    assert.equal(db.prepare(`SELECT COUNT(*) count FROM invoices WHERE contract_id=?`).get(contract.body.id).count, 1)
     const pdfResponse = await fetch(`${base}/contracts/${contract.body.id}/document`, { headers: { authorization: `Bearer ${token}` } })
     assert.equal(pdfResponse.status, 200)
     assert.equal(pdfResponse.headers.get('content-type'), 'application/pdf')
@@ -316,6 +328,13 @@ test('critical dormitory backend flows', async (t) => {
     const signedRenewal = await api(`/contracts/${renewal.body.id}/sign`, { method: 'POST', body: { password: 'Student@123', confirmed: true } })
     assert.equal(signedRenewal.response.status, 200)
     assert.equal(signedRenewal.body.status, 'active')
+    assert.match(signedRenewal.body.invoice_no, /^INV-/)
+    const renewalInvoice = db.prepare(`SELECT * FROM invoices WHERE contract_id=?`).get(renewal.body.id)
+    assert.equal(renewalInvoice.due_date, '2027-01-01')
+    assert.equal(renewalInvoice.total, 8000)
+    assert.deepEqual(db.prepare(`SELECT item_type,amount FROM invoice_items WHERE invoice_id=?`).all(renewalInvoice.id).map(row=>({...row})), [
+      { item_type: 'room', amount: 8000 },
+    ])
     assert.equal(db.prepare(`SELECT status FROM leases WHERE id=?`).get(contract.body.id).status, 'expired')
     token = adminLogin.body.token
 

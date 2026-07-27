@@ -239,7 +239,7 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
       id INTEGER PRIMARY KEY, invoice_no TEXT NOT NULL UNIQUE, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       due_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'issued' CHECK(status IN ('issued','partial','paid','cancelled')),
       total REAL NOT NULL DEFAULT 0, balance REAL NOT NULL DEFAULT 0, cancelled_reason TEXT,
-      cancelled_by INTEGER, cancelled_at TEXT, created_by INTEGER NOT NULL,
+      cancelled_by INTEGER, cancelled_at TEXT, contract_id INTEGER REFERENCES leases(id), created_by INTEGER NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS invoice_items (
@@ -353,7 +353,9 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
   ensureColumn(db, 'leases', 'document_sha256', 'TEXT')
   ensureColumn(db, 'leases', 'renewal_requested_at', 'TEXT')
   ensureColumn(db, 'leases', 'tenant_confirmed_at', 'TEXT')
+  ensureColumn(db, 'invoices', 'contract_id', 'INTEGER REFERENCES leases(id)')
   ensureColumn(db, 'invoices', 'email_sent_at', 'TEXT')
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_contract ON invoices(contract_id) WHERE contract_id IS NOT NULL')
   ensureColumn(db, 'announcements', 'expires_at', 'TEXT')
   ensureColumn(db, 'announcements', 'message_type', "TEXT NOT NULL DEFAULT 'general'")
   ensureColumn(db, 'announcements', 'entity_id', 'INTEGER')
