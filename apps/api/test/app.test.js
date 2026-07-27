@@ -42,6 +42,13 @@ test('critical dormitory backend flows', async (t) => {
     assert.equal(withoutReason.response.status, 400)
     const cancelled = await api(`/master-data/tenant_type/${created.body.id}`, { method: 'DELETE', body: { reason: 'ยกเลิกตามประกาศประเภทผู้เช่าใหม่' } })
     assert.equal(cancelled.response.status, 204)
+    const tenantOptions = await api('/tenants/options')
+    assert.equal(tenantOptions.response.status, 200)
+    assert.equal(tenantOptions.body.tenantTypes.length, 5)
+    assert.ok(tenantOptions.body.titles.some(item => item.name === 'นางสาว'))
+    assert.ok(tenantOptions.body.faculties.some(item => item.name === 'คณะครุศาสตร์'))
+    assert.ok(tenantOptions.body.majors.some(item => item.name === 'การศึกษาปฐมวัย'))
+    assert.ok(!tenantOptions.body.tenantTypes.some(item => item.code === 'VISITING'))
     const policies = await api('/rate-policies')
     assert.equal(policies.response.status, 200)
     assert.ok(policies.body.some(item => item.code === 'ST68_TERM' && item.amount === 8000))
@@ -131,8 +138,9 @@ test('critical dormitory backend flows', async (t) => {
 
   let tenantId
   await t.test('create tenant and portal account with password policy', async () => {
-    const created = await api('/tenants', { method: 'POST', body: { tenantCode: 'ST690001', tenantType: 'student', firstName: 'สมหญิง', lastName: 'เรียนดี', email: 'student@example.test', currentAddress: 'มหาวิทยาลัยตัวอย่าง' } })
+    const created = await api('/tenants', { method: 'POST', body: { tenantCode: 'ST690001', tenantType: 'student', tenantTypeCode: 'STUDENT', firstName: 'สมหญิง', lastName: 'เรียนดี', email: 'student@example.test', currentAddress: 'มหาวิทยาลัยตัวอย่าง' } })
     assert.equal(created.response.status, 201)
+    assert.equal(created.body.tenant_type_code, 'STUDENT')
     tenantId = created.body.id
 
     const weak = await api(`/tenants/${tenantId}/portal-account`, { method: 'POST', body: { username: 'st690001', password: 'short' } })

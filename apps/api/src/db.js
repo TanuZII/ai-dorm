@@ -93,6 +93,7 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
     CREATE TABLE IF NOT EXISTS tenants (
       id INTEGER PRIMARY KEY, tenant_code TEXT NOT NULL UNIQUE,
       tenant_type TEXT NOT NULL CHECK(tenant_type IN ('student','staff','external')),
+      tenant_type_code TEXT,
       title TEXT, first_name TEXT NOT NULL, last_name TEXT NOT NULL, national_id TEXT,
       email TEXT, phone TEXT, current_address TEXT, faculty TEXT, department TEXT,
       status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -335,6 +336,8 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
   ensureColumn(db, 'tenants', 'guardian_phone', 'TEXT')
   ensureColumn(db, 'tenants', 'guardian_email', 'TEXT')
   ensureColumn(db, 'tenants', 'guardian_line_id', 'TEXT')
+  ensureColumn(db, 'tenants', 'tenant_type_code', 'TEXT')
+  db.exec(`UPDATE tenants SET tenant_type_code=UPPER(tenant_type) WHERE tenant_type_code IS NULL`)
   ensureColumn(db, 'tenants', 'emergency_contact_name', 'TEXT')
   ensureColumn(db, 'tenants', 'emergency_contact_phone', 'TEXT')
   ensureColumn(db, 'tenants', 'emergency_contact_relation', 'TEXT')
