@@ -18,6 +18,7 @@ API เริ่มต้นที่ `http://localhost:3000` และเก็
 - Audit log สำหรับ login, create, update, delete, cancel, status change, password reset และ bank import
 - Audit retention ไม่น้อยกว่า 90 วัน (`AUDIT_RETENTION_DAYS` ตั้งต่ำกว่า 90 ไม่ได้)
 - ผู้เช่า 3 ประเภท พร้อมบัญชี Portal และ reset password
+- Tenant Portal แยกหลัง Login สำหรับดูหนี้ ส่งหลักฐาน ดูสัญญา และแจ้งซ่อมเฉพาะรายการของตนเอง
 - อาคาร ชั้น ห้อง เตียง และสถานะว่าง/มีผู้พัก/ไม่พร้อม/ชำรุด
 - Rate plan รายวัน รายเดือน รายเทอม รายปี, ค่าสาธารณูปโภค และค่าธรรมเนียม
 - ใบแจ้งหนี้ PDF/e-mail, หลักฐานการชำระ, ตรวจหลักฐาน, ใบเสร็จ PDF และการยกเลิกแบบบังคับระบุเหตุผล
@@ -37,6 +38,7 @@ API เริ่มต้นที่ `http://localhost:3000` และเก็
 | GET/PATCH | `/api/permissions` | สิทธิ์การใช้งาน |
 | GET | `/api/audit-logs` | ตรวจสอบ Log ย้อนหลัง |
 | GET/POST/PATCH | `/api/tenants` | นักศึกษา บุคลากร บุคคลภายนอก |
+| GET | `/api/tenant-portal/summary` | สรุปห้อง สัญญา หนี้ และงานซ่อมของผู้พักที่ Login |
 | GET/PATCH | `/api/rooms` | ห้องและสถานะห้อง |
 | POST | `/api/invoices` | ตั้งหนี้และออกใบแจ้งหนี้ |
 | POST/GET | `/api/invoices/:id/send`, `/api/invoices/:id/document` | ส่ง e-mail และดาวน์โหลด PDF |

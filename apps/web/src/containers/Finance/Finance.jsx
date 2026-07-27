@@ -5,7 +5,7 @@ import {
   ShieldCheck, Upload, X, XCircle,
 } from 'lucide-react'
 import FinanceTabs from '../../components/FinanceTabs/FinanceTabs'
-import { api, downloadApiFile, openApiFile } from '../../services/api'
+import { api, downloadApiFile, fileToBase64, openApiFile } from '../../services/api'
 
 const fieldClass = 'h-10 w-full rounded-xl border border-[#d7e1e7] bg-white px-3 text-xs outline-none transition focus:border-[#4c8fc8] focus:ring-2 focus:ring-[#4c8fc8]/15'
 const statusLabels = { issued:'รอชำระ', partial:'ชำระบางส่วน', paid:'ชำระแล้ว', cancelled:'ยกเลิก', pending:'รอตรวจ', approved:'อนุมัติแล้ว', rejected:'ไม่ผ่าน', draft:'ฉบับร่าง', submitted:'รออนุมัติ' }
@@ -63,7 +63,7 @@ function Finance({ notify, user }) {
 async function handleSubmit(modal,payload,run){
   if(modal.type==='invoice')return run(()=>api('/invoices',{method:'POST',body:{tenantId:Number(payload.tenantId),dueDate:payload.dueDate,items:[{itemType:payload.itemType,description:payload.description,quantity:1,unitPrice:Number(payload.amount)}]}}),'ออกใบแจ้งหนี้แล้ว')
   if(modal.type==='payment')return run(()=>api('/payments',{method:'POST',body:{invoiceId:Number(payload.invoiceId),amount:Number(payload.amount),method:payload.method,referenceNo:payload.referenceNo||undefined}}),'รับชำระและออกใบเสร็จแล้ว')
-  if(modal.type==='proof')return run(async()=>{const file=payload.file;if(!file)throw new Error('กรุณาเลือกหลักฐานการชำระ');if(file.size>3_000_000)throw new Error('ไฟล์หลักฐานต้องไม่เกิน 3 MB');const fileBase64=await toBase64(file);return api('/payment-proofs',{method:'POST',body:{invoiceId:Number(payload.invoiceId),amount:Number(payload.amount),referenceNo:payload.referenceNo||undefined,paidAt:new Date(payload.paidAt).toISOString(),filename:file.name,mimeType:file.type,fileBase64}})},'แนบหลักฐานแล้ว รอเจ้าหน้าที่ตรวจสอบ')
+  if(modal.type==='proof')return run(async()=>{const file=payload.file;if(!file)throw new Error('กรุณาเลือกหลักฐานการชำระ');if(file.size>3_000_000)throw new Error('ไฟล์หลักฐานต้องไม่เกิน 3 MB');const fileBase64=await fileToBase64(file);return api('/payment-proofs',{method:'POST',body:{invoiceId:Number(payload.invoiceId),amount:Number(payload.amount),referenceNo:payload.referenceNo||undefined,paidAt:new Date(payload.paidAt).toISOString(),filename:file.name,mimeType:file.type,fileBase64}})},'แนบหลักฐานแล้ว รอเจ้าหน้าที่ตรวจสอบ')
   if(modal.type==='review')return run(()=>api(`/payment-proofs/${modal.item.id}/review`,{method:'POST',body:{decision:modal.decision,note:payload.note}}),modal.decision==='approved'?'ตรวจหลักฐานและออกใบเสร็จแล้ว':'บันทึกผลไม่อนุมัติหลักฐานแล้ว')
   if(modal.type==='remittance')return run(()=>api('/remittances',{method:'POST',body:{date:payload.date}}),'สร้างสรุปนำส่งเงินประจำวันแล้ว')
   if(modal.type==='approve-remittance')return run(()=>api(`/remittances/${modal.item.id}/approve`,{method:'POST',body:{revenueTransferReference:payload.revenueTransferReference||undefined,depositTransferReference:payload.depositTransferReference||undefined,universityReceiptNo:payload.universityReceiptNo}}),'อนุมัติและออกเลขนำส่งเงินแล้ว')
@@ -101,6 +101,4 @@ function money(value){return Number(value||0).toLocaleString('th-TH',{minimumFra
 function date(value){return value?new Date(value).toLocaleDateString('th-TH',{dateStyle:'medium'}):'-'}
 function dateTime(value){return value?new Date(value).toLocaleString('th-TH',{dateStyle:'medium',timeStyle:'short'}):'-'}
 function method(value){return({cash:'เงินสด',transfer:'เงินโอน',bank_file:'ไฟล์ธนาคาร',online_account:'บัญชีออนไลน์'})[value]||value}
-function toBase64(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=reject;reader.readAsDataURL(file)})}
-
 export default Finance

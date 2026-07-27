@@ -60,3 +60,12 @@ export async function openApiFile(path) {
   window.open(url, '_blank', 'noopener,noreferrer')
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
+
+export function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).split(',')[1])
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Dashboard from './containers/Dashboard/Dashboard'
 import Login from './containers/Login/Login'
+import TenantPortal from './containers/TenantPortal/TenantPortal'
 import { api, session } from './services/api'
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
 
   if(checking) return <div className="grid min-h-screen place-items-center bg-[#eef3f6] text-xs text-[#5f7485]">กำลังตรวจสอบสิทธิ์...</div>
   if(!user) return <Login onLogin={setUser}/>
+  if(user.tenant_id) return <TenantPortal user={user} onLogout={()=>{session.clear();setUser(null)}} />
   return <Dashboard user={user} onLogout={()=>{session.clear();setUser(null)}} />
 }
 

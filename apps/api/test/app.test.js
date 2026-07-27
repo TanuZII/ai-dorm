@@ -268,4 +268,38 @@ test('critical dormitory backend flows', async (t) => {
     assert.equal(contracts.response.status, 200)
     assert.ok(contracts.body.some(item => item.contract_no === 'CT-690001' && item.status === 'expired'))
   })
+
+  await t.test('tenant portal is isolated to the signed-in tenant', async () => {
+    const otherTenant = await api('/tenants', { method: 'POST', body: { tenantCode: 'EXT690002', tenantType: 'external', firstName: 'ผู้เช่า', lastName: 'คนอื่น', email: 'other@example.test', currentAddress: 'สุพรรณบุรี' } })
+    assert.equal(otherTenant.response.status, 201)
+    const otherInvoice = await api('/invoices', { method: 'POST', body: { tenantId: otherTenant.body.id, dueDate: '2026-09-05', items: [{ itemType: 'room', description: 'ค่าเช่าของผู้เช่าคนอื่น', quantity: 1, unitPrice: 5000 }] } })
+    assert.equal(otherInvoice.response.status, 201)
+    const otherRepair = await api('/repairs', { method: 'POST', body: { roomId: occupiedRoomId, tenantId: otherTenant.body.id, source: 'staff', title: 'งานซ่อมของผู้เช่าคนอื่น', detail: 'ใช้ทดสอบการแยกข้อมูล', priority: 'normal' } })
+    assert.equal(otherRepair.response.status, 201)
+
+    const tenantLogin = await api('/auth/login', { method: 'POST', body: { username: 'st690001', password: 'Student@123' } })
+    token = tenantLogin.body.token
+    const summary = await api('/tenant-portal/summary')
+    assert.equal(summary.response.status, 200)
+    assert.equal(summary.body.id, tenantId)
+
+    const ownInvoices = await api('/invoices')
+    assert.ok(ownInvoices.body.every(item => item.tenant_id === tenantId))
+    assert.ok(!ownInvoices.body.some(item => item.id === otherInvoice.body.id))
+    const crossTenantProof = await api('/payment-proofs', { method: 'POST', body: { invoiceId: otherInvoice.body.id, amount: 5000, referenceNo: 'INVALID-CROSS-TENANT', paidAt: '2026-09-01T10:00:00.000Z', filename: 'proof.pdf', mimeType: 'application/pdf', fileBase64: Buffer.from('cross tenant proof').toString('base64') } })
+    assert.equal(crossTenantProof.response.status, 403)
+
+    const ownContracts = await api('/contracts')
+    assert.ok(ownContracts.body.every(item => item.tenant_id === tenantId))
+    const ownRepairs = await api('/repairs')
+    assert.ok(ownRepairs.body.every(item => item.tenant_id === tenantId))
+    assert.ok(!ownRepairs.body.some(item => item.id === otherRepair.body.id))
+    const otherRepairDetail = await api(`/repairs/${otherRepair.body.id}`)
+    assert.equal(otherRepairDetail.response.status, 404)
+
+    const submittedRepair = await api('/repairs', { method: 'POST', body: { roomId: occupiedRoomId, title: 'แจ้งซ่อมหลังย้ายออก', detail: 'ระบบต้องไม่ยอมผูกกับห้องที่ไม่ได้พัก', priority: 'normal' } })
+    assert.equal(submittedRepair.response.status, 201)
+    assert.equal(submittedRepair.body.tenant_id, tenantId)
+    assert.equal(submittedRepair.body.room_id, null)
+  })
 })
