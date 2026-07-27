@@ -20,6 +20,8 @@ export const permissions = [
   ['repairs.create', 'แจ้งซ่อมผ่านระบบ'],
   ['announcements.read', 'ดูข่าวสาร'], ['announcements.manage', 'จัดการและส่งข่าวสาร'],
   ['announcements.comment', 'แสดงความคิดเห็นในข่าวสาร'],
+  ['checkouts.read', 'ดูคำขอย้ายออกและเงินประกัน'], ['checkouts.create', 'ยื่นคำขอย้ายออก'],
+  ['checkouts.manage', 'ตรวจสอบ อนุมัติ และคืนเงินประกัน'],
   ['inventory.read', 'ดูสต็อก'], ['inventory.manage', 'จัดการสต็อก'],
   ['master.read', 'ดูข้อมูลพื้นฐานและนโยบายค่าเช่า'], ['master.manage', 'จัดการข้อมูลพื้นฐานและนโยบายค่าเช่า'],
 ]
@@ -146,7 +148,8 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
       audience_type TEXT NOT NULL CHECK(audience_type IN ('all','room')),
       room_id INTEGER REFERENCES rooms(id), comments_enabled INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published','closed')),
-      published_at TEXT, created_by INTEGER NOT NULL REFERENCES users(id),
+      published_at TEXT, expires_at TEXT, message_type TEXT NOT NULL DEFAULT 'general', entity_id INTEGER,
+      created_by INTEGER NOT NULL REFERENCES users(id),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CHECK(audience_type='all' OR room_id IS NOT NULL)
     );
@@ -186,6 +189,21 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
       status TEXT NOT NULL DEFAULT 'completed', created_by INTEGER NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS checkout_requests (
+      id INTEGER PRIMARY KEY, request_no TEXT NOT NULL UNIQUE,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id), lease_id INTEGER REFERENCES leases(id),
+      bed_id INTEGER REFERENCES beds(id), room_id INTEGER REFERENCES rooms(id),
+      requested_checkout_date TEXT NOT NULL, reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'submitted' CHECK(status IN ('submitted','debt_checked','inspected','approved','rejected')),
+      outstanding_debt REAL NOT NULL DEFAULT 0, debt_checked_at TEXT, debt_checked_by INTEGER,
+      room_inspected_at TEXT, room_inspected_by INTEGER, inspection_note TEXT,
+      final_water_reading REAL, final_electricity_reading REAL,
+      final_utility_amount REAL NOT NULL DEFAULT 0, damage_detail TEXT, damage_amount REAL NOT NULL DEFAULT 0,
+      final_invoice_id INTEGER REFERENCES invoices(id), approved_at TEXT, approved_by INTEGER,
+      rejected_reason TEXT, completed_checkout_id INTEGER REFERENCES checkouts(id),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_checkout_requests_tenant ON checkout_requests(tenant_id,status,created_at);
     CREATE TABLE IF NOT EXISTS room_inspections (
       id INTEGER PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id),
       readiness_status TEXT NOT NULL CHECK(readiness_status IN ('ready','not_ready')),
@@ -334,6 +352,16 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
   ensureColumn(db, 'leases', 'renewal_requested_at', 'TEXT')
   ensureColumn(db, 'leases', 'tenant_confirmed_at', 'TEXT')
   ensureColumn(db, 'invoices', 'email_sent_at', 'TEXT')
+  ensureColumn(db, 'announcements', 'expires_at', 'TEXT')
+  ensureColumn(db, 'announcements', 'message_type', "TEXT NOT NULL DEFAULT 'general'")
+  ensureColumn(db, 'announcements', 'entity_id', 'INTEGER')
+  ensureColumn(db, 'checkouts', 'refund_transfer_status', "TEXT NOT NULL DEFAULT 'pending'")
+  ensureColumn(db, 'checkouts', 'refund_transfer_reference', 'TEXT')
+  ensureColumn(db, 'checkouts', 'refund_transferred_at', 'TEXT')
+  ensureColumn(db, 'checkouts', 'refund_proof_filename', 'TEXT')
+  ensureColumn(db, 'checkouts', 'refund_proof_mime_type', 'TEXT')
+  ensureColumn(db, 'checkouts', 'refund_proof_base64', 'TEXT')
+  ensureColumn(db, 'checkouts', 'refund_notified_at', 'TEXT')
   seed(db)
   return db
 }
@@ -346,7 +374,7 @@ function seed(db) {
   const adminRole = db.prepare(`SELECT id FROM roles WHERE name='ผู้ดูแลระบบ'`).get()
   db.prepare(`INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT ?,id FROM permissions`).run(adminRole.id)
   const tenantRole = db.prepare(`SELECT id FROM roles WHERE name='ผู้เช่า' AND deleted_at IS NULL`).get()
-  if (tenantRole) db.prepare(`INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT ?,id FROM permissions WHERE code IN ('repairs.read','repairs.create','contracts.read','contracts.sign','finance.read','announcements.read','announcements.comment')`).run(tenantRole.id)
+  if (tenantRole) db.prepare(`INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT ?,id FROM permissions WHERE code IN ('repairs.read','repairs.create','contracts.read','contracts.sign','finance.read','announcements.read','announcements.comment','checkouts.read','checkouts.create')`).run(tenantRole.id)
 
   const adminExists = db.prepare(`SELECT id FROM users WHERE username='admin'`).get()
   if (!adminExists) {

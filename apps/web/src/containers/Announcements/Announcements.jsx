@@ -11,6 +11,7 @@ function Announcements({ notify }) {
   const [loading, setLoading] = useState(true)
   const [audience, setAudience] = useState('all')
   const [commentsEnabled, setCommentsEnabled] = useState(true)
+  const [messageType, setMessageType] = useState('general')
 
   const load = async () => {
     setLoading(true)
@@ -23,8 +24,8 @@ function Announcements({ notify }) {
     event.preventDefault(); setSaving(true)
     const form = Object.fromEntries(new FormData(event.currentTarget))
     try {
-      await api('/announcements', { method: 'POST', body: { title: form.title, body: form.body, audienceType: audience, roomId: audience === 'room' ? Number(form.roomId) : null, commentsEnabled, publish: true } })
-      event.currentTarget.reset(); setAudience('all'); setCommentsEnabled(true); notify('เผยแพร่ข่าวสารแล้ว'); await load()
+      await api('/announcements', { method: 'POST', body: { title: form.title, body: form.body, audienceType: audience, roomId: audience === 'room' ? Number(form.roomId) : null, commentsEnabled, publish: true, expiresAt: new Date(form.expiresAt).toISOString(), messageType, entityId: form.entityId ? Number(form.entityId) : null } })
+      event.currentTarget.reset(); setAudience('all'); setCommentsEnabled(true); setMessageType('general'); notify('เผยแพร่ข้อความบน Landing Page แล้ว'); await load()
     } catch (error) { notify(error.message) } finally { setSaving(false) }
   }
 
@@ -33,11 +34,13 @@ function Announcements({ notify }) {
   return <div className="grid gap-5 xl:grid-cols-[390px_minmax(0,1fr)]">
     <form onSubmit={submit} className="self-start overflow-hidden rounded-3xl border border-[#dbe5e9] bg-white shadow-sm xl:sticky xl:top-24">
       <div className="bg-[#16324f] p-6 text-white"><p className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[.16em] text-[#9fc5cf]"><Radio size={13}/> Dormitory broadcast</p><h2 className="mt-3 text-xl font-semibold">ส่งข่าวถึงหน้าห้อง</h2><p className="mt-2 text-[10px] leading-5 text-[#bfd0dc]">เลือกส่งทุกห้องหรือจ่าหน้าถึงห้องเดียว พร้อมกำหนดพื้นที่สนทนาของผู้เช่า</p></div>
-      <div className="space-y-4 p-5"><label><span className="mb-1.5 block text-[10px] font-medium text-[#536d7f]">หัวข้อข่าว</span><input required name="title" maxLength="200" className={fieldClass} placeholder="เช่น แจ้งปิดน้ำชั่วคราว"/></label><label><span className="mb-1.5 block text-[10px] font-medium text-[#536d7f]">ข้อความ</span><textarea required name="body" maxLength="5000" rows="5" className={`${fieldClass} h-auto py-3 leading-5`} placeholder="ระบุวัน เวลา และสิ่งที่ผู้เช่าต้องดำเนินการ"/></label>
+      <div className="space-y-4 p-5"><label><span className="mb-1.5 block text-[10px] font-medium text-[#536d7f]">หัวข้อข้อความ</span><input required name="title" maxLength="200" className={fieldClass} placeholder="เช่น แจ้งเตือนใบแจ้งหนี้ค้างชำระ"/></label><label><span className="mb-1.5 block text-[10px] font-medium text-[#536d7f]">ข้อความ</span><textarea required name="body" maxLength="5000" rows="5" className={`${fieldClass} h-auto py-3 leading-5`} placeholder="ระบุรายละเอียดและสิ่งที่ผู้เช่าต้องดำเนินการ"/></label>
+        <div className="grid grid-cols-2 gap-3"><label><span className="mb-1.5 block text-[10px] font-medium text-[#536d7f]">ประเภทข้อความ</span><select value={messageType} onChange={event=>setMessageType(event.target.value)} className={fieldClass}><option value="general">ข่าวทั่วไป</option><option value="contract">สัญญาเช่า</option><option value="invoice">ใบแจ้งหนี้</option><option value="receipt">ใบเสร็จรับเงิน</option><option value="overdue">แจ้งค้างชำระ</option></select></label><label><span className="mb-1.5 block text-[10px] font-medium text-[#536d7f]">อ้างอิงเลข ID</span><input type="number" min="1" name="entityId" className={fieldClass} placeholder="ไม่บังคับ"/></label></div>
+        <label><span className="mb-1.5 block text-[10px] font-medium text-[#536d7f]">แสดงถึงวัน–เวลา</span><input required type="datetime-local" name="expiresAt" className={fieldClass}/><small className="mt-1 block text-[8px] text-[#8998a2]">เมื่อหมดอายุ ข้อความจะหายจาก Landing Page อัตโนมัติ</small></label>
         <div><span className="mb-2 block text-[10px] font-medium text-[#536d7f]">ผู้รับข่าว</span><div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setAudience('all')} className={`rounded-xl border p-3 text-left ${audience === 'all' ? 'border-[#0f766e] bg-[#e9f6f2] text-[#0f665b]' : 'border-[#dbe5e9] text-[#647988]'}`}><Users size={16}/><b className="mt-2 block text-[10px]">ทุกห้อง</b><small className="text-[8px]">ประกาศส่วนกลาง</small></button><button type="button" onClick={() => setAudience('room')} className={`rounded-xl border p-3 text-left ${audience === 'room' ? 'border-[#0f766e] bg-[#e9f6f2] text-[#0f665b]' : 'border-[#dbe5e9] text-[#647988]'}`}><Building2 size={16}/><b className="mt-2 block text-[10px]">เฉพาะห้อง</b><small className="text-[8px]">ข้อความเจาะจง</small></button></div></div>
         {audience === 'room' && <label><span className="mb-1.5 block text-[10px] font-medium text-[#536d7f]">ห้องที่ต้องการแจ้ง</span><select required name="roomId" className={fieldClass}><option value="">เลือกอาคารและห้อง</option>{rooms.map(room => <option key={room.id} value={room.id}>{room.building_name} · ชั้น {room.floor_no} · ห้อง {room.room_no}</option>)}</select></label>}
         <button type="button" onClick={() => setCommentsEnabled(value => !value)} className="flex w-full items-center gap-3 rounded-xl bg-[#f4f7f8] p-3 text-left"><span className={`grid size-8 place-items-center rounded-lg ${commentsEnabled ? 'bg-[#dff4ec] text-[#0f766e]' : 'bg-[#e7ebed] text-[#74838e]'}`}>{commentsEnabled ? <MessageCircle size={15}/> : <Lock size={14}/>}</span><span className="flex-1"><b className="block text-[10px] text-[#355267]">{commentsEnabled ? 'เปิดคอมเมนต์' : 'ปิดคอมเมนต์'}</b><small className="text-[8px] text-[#81919c]">คลิกเพื่อเปลี่ยนการตอบกลับของผู้เช่า</small></span><span className={`h-5 w-9 rounded-full p-0.5 ${commentsEnabled ? 'bg-[#0f766e]' : 'bg-[#b8c2c8]'}`}><i className={`block size-4 rounded-full bg-white transition ${commentsEnabled ? 'translate-x-4' : ''}`}/></span></button>
-        <button disabled={saving} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#d97706] text-xs font-semibold text-white shadow-[0_3px_0_#9b5204] active:translate-y-0.5 active:shadow-none disabled:opacity-50">{saving ? <LoaderCircle size={15} className="animate-spin"/> : <Send size={15}/>} เผยแพร่ข่าวสาร</button>
+        <button disabled={saving} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#d97706] text-xs font-semibold text-white shadow-[0_3px_0_#9b5204] active:translate-y-0.5 active:shadow-none disabled:opacity-50">{saving ? <LoaderCircle size={15} className="animate-spin"/> : <Send size={15}/>} เผยแพร่ข้อความ</button>
       </div>
     </form>
 

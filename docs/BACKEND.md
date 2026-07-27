@@ -60,6 +60,12 @@ API เริ่มต้นที่ `http://localhost:3000` และเก็
 | GET | `/api/reports/general/export.xlsx` | ส่งออกรายงาน Excel พร้อม filter และชนิดข้อมูลตัวเลข/วันที่ |
 | GET/POST/PATCH | `/api/announcements` | ดู เผยแพร่ และปิดข่าวสาร |
 | GET/POST | `/api/announcements/:id/comments` | อ่านและตอบความคิดเห็นตามสิทธิ์ผู้รับข่าว |
+| GET/POST | `/api/checkout-requests` | ดูหรือยื่นคำขอย้ายออกตามขอบเขตผู้เช่า |
+| POST | `/api/checkout-requests/:id/debt-review` | ตรวจยอดค้างก่อนย้ายออก |
+| POST | `/api/checkout-requests/:id/inspection` | ตรวจห้อง มิเตอร์ ความเสียหาย และออกหนี้รอบสุดท้าย |
+| POST | `/api/checkout-requests/:id/approve` | อนุมัติย้ายออกหลังปลอดหนี้ |
+| GET | `/api/checkouts` | ดูผลย้ายออกและยอดคืนเงินประกัน |
+| POST/GET | `/api/checkouts/:id/refund-transfer`, `/api/checkouts/:id/refund-proof` | บันทึกและดูหลักฐานโอนคืนเงินประกัน |
 | GET/POST/PATCH | `/api/repairs` | งานซ่อม |
 | GET/POST | `/api/inventory` | สต็อกและการเบิกจ่าย |
 

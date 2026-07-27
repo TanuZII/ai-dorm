@@ -9,6 +9,7 @@ const navigationItems = [
   { label: 'อาคารและห้องพัก', icon: Building2 },
   { label: 'ผู้เช่า', icon: Users },
   { label: 'การจองและสัญญา', icon: ClipboardList },
+  { label: 'Check-out และเงินประกัน', icon: LogOut },
   { label: 'การเงิน', icon: CreditCard, badge: 12 },
   { label: 'มิเตอร์น้ำ–ไฟ', icon: Zap },
   { label: 'งานซ่อม', icon: Wrench, badge: 4 },

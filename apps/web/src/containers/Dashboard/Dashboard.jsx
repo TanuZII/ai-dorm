@@ -12,6 +12,7 @@ import RoomOperations from '../RoomOperations/RoomOperations'
 import ContractDesk from '../ContractDesk/ContractDesk'
 import Reports from '../Reports/Reports'
 import Announcements from '../Announcements/Announcements'
+import CheckoutDesk from '../CheckoutDesk/CheckoutDesk'
 import {
   Bell, Building2, CalendarDays, ChevronDown, ChevronRight, CircleDollarSign,
   DoorOpen, GraduationCap, Hammer, LogOut, Menu, ReceiptText, Search, Settings,
@@ -97,6 +98,7 @@ function Dashboard({ user, onLogout }) {
           : active === 'ข้อมูลพื้นฐาน' ? <MasterData notify={notify} />
           : active === 'อาคารและห้องพัก' || active === 'มิเตอร์น้ำ–ไฟ' ? <RoomOperations notify={notify} />
           : active === 'การจองและสัญญา' ? <ContractDesk user={user} notify={notify} />
+          : active === 'Check-out และเงินประกัน' ? <CheckoutDesk notify={notify} />
           : active === 'ผู้เช่า' ? <Tenants notify={notify} />
           : active === 'งานซ่อม' ? <Repairs notify={notify} />
           : active === 'สต็อก' ? <Inventory notify={notify} />

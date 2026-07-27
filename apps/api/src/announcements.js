@@ -10,6 +10,9 @@ const announcementSchema = z.object({
   roomId: idSchema.nullable().optional(),
   commentsEnabled: z.boolean().default(false),
   publish: z.boolean().default(true),
+  expiresAt: z.iso.datetime().nullable().optional(),
+  messageType: z.enum(['general', 'contract', 'invoice', 'receipt', 'overdue']).default('general'),
+  entityId: idSchema.nullable().optional(),
 }).refine(value => value.audienceType !== 'room' || value.roomId, { message: 'กรุณาเลือกห้องที่ต้องการแจ้ง', path: ['roomId'] })
 
 function validate(schema, value) {
@@ -21,12 +24,12 @@ function validate(schema, value) {
 function fail(status, code, message) { throw Object.assign(new Error(message), { status, code }) }
 function getAnnouncement(db, id) { return db.prepare(`SELECT * FROM announcements WHERE id=?`).get(id) }
 function getTenantRoomId(db, tenantId) { return db.prepare(`SELECT room_id FROM beds WHERE tenant_id=? AND status IN ('reserved','occupied') ORDER BY id LIMIT 1`).get(tenantId)?.room_id || null }
-function canRead(user, announcement, roomId) { return !user.tenant_id || (announcement.status === 'published' && (announcement.audience_type === 'all' || announcement.room_id === roomId)) }
+function canRead(user, announcement, roomId) { return !user.tenant_id || (announcement.status === 'published' && (!announcement.expires_at || new Date(announcement.expires_at) > new Date()) && (announcement.audience_type === 'all' || announcement.room_id === roomId)) }
 
 export function registerAnnouncementRoutes(app, db) {
   app.get('/api/announcements', requirePermission('announcements.read'), (req, res) => {
     const roomId = req.user.tenant_id ? getTenantRoomId(db, req.user.tenant_id) : null
-    const where = req.user.tenant_id ? `WHERE a.status='published' AND (a.audience_type='all' OR a.room_id=?)` : ''
+    const where = req.user.tenant_id ? `WHERE a.status='published' AND (a.expires_at IS NULL OR datetime(a.expires_at)>CURRENT_TIMESTAMP) AND (a.audience_type='all' OR a.room_id=?)` : ''
     const params = req.user.tenant_id ? [roomId || -1] : []
     res.json(db.prepare(`SELECT a.*,r.room_no,b.name building_name,u.display_name created_by_name,
       (SELECT COUNT(*) FROM announcement_comments c WHERE c.announcement_id=a.id AND c.status='visible') comment_count
@@ -39,8 +42,8 @@ export function registerAnnouncementRoutes(app, db) {
       const body = validate(announcementSchema, req.body)
       if (body.roomId && !db.prepare(`SELECT id FROM rooms WHERE id=?`).get(body.roomId)) fail(404, 'ROOM_NOT_FOUND', 'ไม่พบห้องที่เลือก')
       const status = body.publish ? 'published' : 'draft'
-      const result = db.prepare(`INSERT INTO announcements(title,body,audience_type,room_id,comments_enabled,status,published_at,created_by) VALUES (?,?,?,?,?,?,CASE WHEN ?='published' THEN CURRENT_TIMESTAMP END,?)`)
-        .run(body.title, body.body, body.audienceType, body.audienceType === 'room' ? body.roomId : null, body.commentsEnabled ? 1 : 0, status, status, req.user.id)
+      const result = db.prepare(`INSERT INTO announcements(title,body,audience_type,room_id,comments_enabled,status,published_at,expires_at,message_type,entity_id,created_by) VALUES (?,?,?,?,?,?,CASE WHEN ?='published' THEN CURRENT_TIMESTAMP END,?,?,?,?)`)
+        .run(body.title, body.body, body.audienceType, body.audienceType === 'room' ? body.roomId : null, body.commentsEnabled ? 1 : 0, status, status, body.expiresAt || null, body.messageType, body.entityId || null, req.user.id)
       const created = getAnnouncement(db, Number(result.lastInsertRowid))
       writeAudit(db, req, { action: body.publish ? 'PUBLISH' : 'CREATE', entityType: 'announcement', entityId: created.id, after: created })
       res.status(201).json(created)

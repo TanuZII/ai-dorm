@@ -36,6 +36,17 @@ export async function sendInvoiceEmail({ to, invoiceNo, dueDate, total }) {
   return { status: 'sent', messageId: result.messageId }
 }
 
+export async function sendNotificationEmail({ to, title, message }) {
+  if (!to || !emailConfigured()) return { status: 'queued' }
+  const transporter = createTransporter()
+  const portalUrl = process.env.PORTAL_BASE_URL || 'http://localhost:5173'
+  const result = await transporter.sendMail({
+    from: process.env.MAIL_FROM, to, subject: title,
+    text: `${message}\n\nตรวจสอบรายละเอียดได้ที่ ${portalUrl}`,
+  })
+  return { status: 'sent', messageId: result.messageId }
+}
+
 function createTransporter() {
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
