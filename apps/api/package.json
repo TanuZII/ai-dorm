@@ -20,6 +20,7 @@
     "ldapts": "^8.0.9",
     "nodemailer": "^9.0.3",
     "pdfkit": "^0.19.1",
+    "xlsx-populate": "^1.21.0",
     "zod": "^4.0.10"
   }
 }

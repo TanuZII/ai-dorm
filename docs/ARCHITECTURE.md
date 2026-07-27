@@ -28,6 +28,8 @@
 - `auth.js` ตรวจ credentials, JWT และ permission
 - `ldap.js` เชื่อมฐานผู้ใช้งานกลาง
 - `audit.js` กรองข้อมูลลับและเขียน audit trail
+- `reports.js` รวมคำจำกัดความรายงาน สูตรแบ่งรายได้ และสร้างไฟล์ Excel
+- `announcements.js` ควบคุมผู้รับข่าวระดับทุกห้อง/เฉพาะห้องและคอมเมนต์ผู้เช่า
 - `test/` ทดสอบ flow ผ่าน HTTP API จริงด้วยฐานข้อมูล in-memory
 
 เมื่อโมดูลใน `app.js` เติบโต ค่อยแยกตาม domain เช่น `modules/finance`, `modules/tenants` และ `modules/inventory` โดยไม่ต้องแยกก่อนมีความซับซ้อนจริง

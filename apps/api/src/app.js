@@ -11,6 +11,8 @@ import { randomUUID } from 'node:crypto'
 import { createContractPdf, sha256 } from './contractPdf.js'
 import { createInvoicePdf, createReceiptPdf } from './financePdf.js'
 import { emailConfigured, sendContractSignatureEmail, sendInvoiceEmail } from './email.js'
+import { buildReport, createReportXlsx, reportCatalog } from './reports.js'
+import { registerAnnouncementRoutes } from './announcements.js'
 
 const passwordSchema = z.string().min(8, 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร').max(128)
   .regex(/[A-Z]/, 'ต้องมีอักษรพิมพ์ใหญ่อย่างน้อย 1 ตัว')
@@ -295,7 +297,7 @@ export function createApp(options = {}) {
       const result=db.prepare(`INSERT INTO users(username,password_hash,display_name,email,tenant_id) VALUES (?,?,?,?,?)`).run(b.username,await bcrypt.hash(b.password,12),`${tenant.first_name} ${tenant.last_name}`,tenant.email,tenantId)
       const role=db.prepare(`SELECT id FROM roles WHERE name='ผู้เช่า' AND deleted_at IS NULL`).get() || (()=>{const r=db.prepare(`INSERT INTO roles(name,description) VALUES ('ผู้เช่า','เข้าถึงข้อมูลของตนเองผ่าน Portal')`).run();return{id:Number(r.lastInsertRowid)}})()
       db.prepare(`INSERT INTO user_roles(user_id,role_id) VALUES (?,?)`).run(result.lastInsertRowid,role.id)
-      db.prepare(`INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT ?,id FROM permissions WHERE code IN ('repairs.read','repairs.create','contracts.read','contracts.sign','finance.read')`).run(role.id)
+      db.prepare(`INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT ?,id FROM permissions WHERE code IN ('repairs.read','repairs.create','contracts.read','contracts.sign','finance.read','announcements.read','announcements.comment')`).run(role.id)
       writeAudit(db,req,{action:'CREATE_PORTAL_ACCOUNT',entityType:'tenant',entityId:tenantId,after:{username:b.username}});res.status(201).json(loadUser(db,Number(result.lastInsertRowid)))
     }catch(error){next(error)}
   })
@@ -320,6 +322,7 @@ export function createApp(options = {}) {
 
   registerFinanceRoutes(app, db)
   registerSupportRoutes(app, db)
+  registerAnnouncementRoutes(app, db)
 
   app.use((error, _req, res, _next) => {
     if (error?.code?.startsWith('SQLITE_CONSTRAINT')) return res.status(409).json({ error: 'CONFLICT', message: 'ข้อมูลซ้ำหรือมีข้อมูลอื่นอ้างอิงอยู่' })
@@ -487,6 +490,9 @@ function registerFinanceRoutes(app, db) {
   app.get('/api/reports/debtors', requirePermission('reports.read'), (req,res)=>res.json(db.prepare(`SELECT i.invoice_no,i.due_date,i.total,i.balance,CAST(julianday('now')-julianday(i.due_date) AS INTEGER) age_days,t.tenant_code,t.tenant_type,t.first_name,t.last_name FROM invoices i JOIN tenants t ON t.id=i.tenant_id WHERE i.balance>0 AND i.status!='cancelled' ORDER BY age_days DESC`).all()))
   app.get('/api/reports/deposits', requirePermission('reports.read'), (_req,res)=>res.json(db.prepare(`SELECT t.tenant_code,t.first_name,t.last_name,SUM(ii.amount) deposit_amount FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id JOIN tenants t ON t.id=i.tenant_id WHERE ii.item_type='deposit' AND i.status='paid' GROUP BY t.id ORDER BY t.tenant_code`).all()))
   app.get('/api/reports/contracts', requirePermission('reports.read'), (_req,res)=>res.json(db.prepare(`SELECT l.contract_no,l.contract_type,l.starts_at,l.ends_at,l.deposit_amount,l.status,t.tenant_code,t.tenant_type,t.first_name,t.last_name,r.room_no,b.bed_no FROM leases l JOIN tenants t ON t.id=l.tenant_id LEFT JOIN beds b ON b.id=l.bed_id LEFT JOIN rooms r ON r.id=b.room_id ORDER BY l.starts_at DESC,l.contract_no`).all()))
+  app.get('/api/reports/catalog', requirePermission('reports.read'), (_req,res)=>res.json(reportCatalog))
+  app.get('/api/reports/general', requirePermission('reports.read'), (req,res,next)=>{try{res.json(buildReport(db,req.query))}catch(error){next(error)}})
+  app.get('/api/reports/general/export.xlsx', requirePermission('reports.read'), async (req,res,next)=>{try{const report=buildReport(db,req.query),buffer=await createReportXlsx(report);const filename=`dormitory-${report.type}-${new Date().toISOString().slice(0,10)}.xlsx`;res.set({'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','content-disposition':`attachment; filename="${filename}"`,'cache-control':'private, no-store'}).send(Buffer.from(buffer))}catch(error){next(error)}})
 }
 
 function financialAccount(purpose, bank, name, number, branch) {

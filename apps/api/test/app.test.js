@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import XlsxPopulate from 'xlsx-populate'
 import { createDb } from '../src/db.js'
 import { createApp } from '../src/app.js'
 
@@ -301,5 +302,60 @@ test('critical dormitory backend flows', async (t) => {
     assert.equal(submittedRepair.response.status, 201)
     assert.equal(submittedRepair.body.tenant_id, tenantId)
     assert.equal(submittedRepair.body.room_id, null)
+  })
+
+  await t.test('general reports calculate remittance rules and export sortable Excel', async () => {
+    const adminLogin = await api('/auth/login', { method: 'POST', body: { username: 'admin', password: 'Admin@1234' } })
+    token = adminLogin.body.token
+    const invoice = await api('/invoices', { method: 'POST', body: { tenantId, dueDate: '2026-09-05', items: [
+      { itemType: 'room', description: 'ค่าเช่าห้องพัก', quantity: 1, unitPrice: 1000 },
+      { itemType: 'water', description: 'ค่าน้ำประปา', quantity: 1, unitPrice: 100 },
+      { itemType: 'electricity', description: 'ค่าไฟฟ้า', quantity: 1, unitPrice: 200 },
+      { itemType: 'late_fee', description: 'ค่าปรับชำระล่าช้า', quantity: 1, unitPrice: 100 },
+      { itemType: 'deposit', description: 'เงินประกันห้องพัก', quantity: 1, unitPrice: 2000 },
+      { itemType: 'food_beverage', description: 'ค่าอาหารและเครื่องดื่ม', quantity: 1, unitPrice: 500 },
+    ] } })
+    assert.equal(invoice.response.status, 201)
+    const paid = await api('/payments', { method: 'POST', body: { invoiceId: invoice.body.id, amount: 3900, method: 'cash', referenceNo: 'REPORT-001', paidAt: '2026-09-01T09:00:00.000Z' } })
+    assert.equal(paid.response.status, 201)
+
+    const utilities = await api('/reports/general?type=utilities&from=2026-09-01&to=2026-09-30&period=monthly')
+    assert.equal(utilities.response.status, 200)
+    assert.equal(utilities.body.rows[0].water, 100)
+    assert.equal(utilities.body.rows[0].electricity, 200)
+    const remittance = await api('/reports/general?type=revenue-remittance&from=2026-09-01&to=2026-09-30')
+    assert.equal(remittance.response.status, 200)
+    assert.ok(remittance.body.rows.some(row => row.revenue_type === 'ค่าห้องพัก' && row.reclaim_amount === 800 && row.university_amount === 200))
+    assert.ok(remittance.body.rows.some(row => row.revenue_type === 'ค่าน้ำประปา' && row.university_amount === 100))
+    assert.ok(remittance.body.rows.some(row => row.revenue_type === 'ค่าอาหารและเครื่องดื่ม' && row.reclaim_amount === 500 && row.university_amount === 0))
+
+    const response = await fetch(`${base}/reports/general/export.xlsx?type=utilities&from=2026-09-01&to=2026-09-30`, { headers: { authorization: `Bearer ${token}` } })
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('content-type'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    const workbook = Buffer.from(await response.arrayBuffer())
+    assert.equal(workbook.subarray(0, 2).toString(), 'PK')
+    assert.ok(workbook.length > 5000)
+    const parsedWorkbook = await XlsxPopulate.fromDataAsync(workbook)
+    assert.equal(parsedWorkbook.sheet('รายงาน').cell('A5').value(), 'งวดรับชำระ')
+  })
+
+  await t.test('announcements respect room audience and comment setting', async () => {
+    const allRooms = await api('/announcements', { method: 'POST', body: { title: 'แจ้งทดสอบส่วนกลาง', body: 'ข้อความสำหรับผู้เช่าทุกห้อง', audienceType: 'all', commentsEnabled: true, publish: true } })
+    assert.equal(allRooms.response.status, 201)
+    const roomOnly = await api('/announcements', { method: 'POST', body: { title: 'แจ้งเฉพาะห้อง', body: 'ข้อความที่ผู้ย้ายออกไม่ควรเห็น', audienceType: 'room', roomId: occupiedRoomId, commentsEnabled: false, publish: true } })
+    assert.equal(roomOnly.response.status, 201)
+
+    const tenantLogin = await api('/auth/login', { method: 'POST', body: { username: 'st690001', password: 'Student@123' } })
+    token = tenantLogin.body.token
+    const visible = await api('/announcements')
+    assert.equal(visible.response.status, 200)
+    assert.ok(visible.body.some(item => item.id === allRooms.body.id))
+    assert.ok(!visible.body.some(item => item.id === roomOnly.body.id))
+    const comment = await api(`/announcements/${allRooms.body.id}/comments`, { method: 'POST', body: { body: 'รับทราบประกาศแล้ว' } })
+    assert.equal(comment.response.status, 201)
+    const comments = await api(`/announcements/${allRooms.body.id}/comments`)
+    assert.equal(comments.body.length, 1)
+    const hiddenComment = await api(`/announcements/${roomOnly.body.id}/comments`, { method: 'POST', body: { body: 'ไม่ควรส่งได้' } })
+    assert.equal(hiddenComment.response.status, 404)
   })
 })

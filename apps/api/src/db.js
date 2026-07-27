@@ -18,6 +18,8 @@ export const permissions = [
   ['finance.approve', 'ตรวจหลักฐานและอนุมัติการนำส่งเงิน'], ['reports.read', 'ดูและส่งออกรายงาน'],
   ['repairs.read', 'ดูงานซ่อม'], ['repairs.manage', 'จัดการงานซ่อม'],
   ['repairs.create', 'แจ้งซ่อมผ่านระบบ'],
+  ['announcements.read', 'ดูข่าวสาร'], ['announcements.manage', 'จัดการและส่งข่าวสาร'],
+  ['announcements.comment', 'แสดงความคิดเห็นในข่าวสาร'],
   ['inventory.read', 'ดูสต็อก'], ['inventory.manage', 'จัดการสต็อก'],
   ['master.read', 'ดูข้อมูลพื้นฐานและนโยบายค่าเช่า'], ['master.manage', 'จัดการข้อมูลพื้นฐานและนโยบายค่าเช่า'],
 ]
@@ -139,6 +141,23 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
       delivery_status TEXT NOT NULL DEFAULT 'queued', read_at TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS announcements (
+      id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
+      audience_type TEXT NOT NULL CHECK(audience_type IN ('all','room')),
+      room_id INTEGER REFERENCES rooms(id), comments_enabled INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published','closed')),
+      published_at TEXT, created_by INTEGER NOT NULL REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CHECK(audience_type='all' OR room_id IS NOT NULL)
+    );
+    CREATE TABLE IF NOT EXISTS announcement_comments (
+      id INTEGER PRIMARY KEY, announcement_id INTEGER NOT NULL REFERENCES announcements(id),
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id), user_id INTEGER NOT NULL REFERENCES users(id),
+      body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'visible' CHECK(status IN ('visible','hidden')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_announcements_audience ON announcements(status,audience_type,room_id,published_at);
+    CREATE INDEX IF NOT EXISTS idx_announcement_comments ON announcement_comments(announcement_id,status,created_at);
     CREATE TABLE IF NOT EXISTS tenant_documents (
       id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id), document_type TEXT NOT NULL,
       filename TEXT NOT NULL, mime_type TEXT NOT NULL, file_data BLOB NOT NULL, sha256 TEXT NOT NULL,
@@ -327,7 +346,7 @@ function seed(db) {
   const adminRole = db.prepare(`SELECT id FROM roles WHERE name='ผู้ดูแลระบบ'`).get()
   db.prepare(`INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT ?,id FROM permissions`).run(adminRole.id)
   const tenantRole = db.prepare(`SELECT id FROM roles WHERE name='ผู้เช่า' AND deleted_at IS NULL`).get()
-  if (tenantRole) db.prepare(`INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT ?,id FROM permissions WHERE code IN ('repairs.read','repairs.create','contracts.read','contracts.sign','finance.read')`).run(tenantRole.id)
+  if (tenantRole) db.prepare(`INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT ?,id FROM permissions WHERE code IN ('repairs.read','repairs.create','contracts.read','contracts.sign','finance.read','announcements.read','announcements.comment')`).run(tenantRole.id)
 
   const adminExists = db.prepare(`SELECT id FROM users WHERE username='admin'`).get()
   if (!adminExists) {

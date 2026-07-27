@@ -10,6 +10,8 @@ import Administration from '../Administration/Administration'
 import MasterData from '../MasterData/MasterData'
 import RoomOperations from '../RoomOperations/RoomOperations'
 import ContractDesk from '../ContractDesk/ContractDesk'
+import Reports from '../Reports/Reports'
+import Announcements from '../Announcements/Announcements'
 import {
   Bell, Building2, CalendarDays, ChevronDown, ChevronRight, CircleDollarSign,
   DoorOpen, GraduationCap, Hammer, LogOut, Menu, ReceiptText, Search, Settings,
@@ -98,6 +100,8 @@ function Dashboard({ user, onLogout }) {
           : active === 'ผู้เช่า' ? <Tenants notify={notify} />
           : active === 'งานซ่อม' ? <Repairs notify={notify} />
           : active === 'สต็อก' ? <Inventory notify={notify} />
+          : active === 'ประกาศ' ? <Announcements notify={notify} />
+          : active === 'รายงาน' ? <Reports notify={notify} />
           : active === 'ผู้ใช้และสิทธิ์' ? <Administration key="admin" notify={notify} />
           : active === 'History Log' ? <Administration key="logs" notify={notify} initialTab="logs" />
           : <>
