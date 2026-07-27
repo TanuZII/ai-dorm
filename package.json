@@ -1,0 +1,16 @@
+{
+  "name": "campus-nest",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace @campus-nest/web",
+    "dev:api": "npm run dev --workspace @campus-nest/api",
+    "start:api": "npm run start --workspace @campus-nest/api",
+    "build": "npm run build --workspace @campus-nest/web",
+    "test": "npm run test --workspaces --if-present",
+    "test:api": "npm run test --workspace @campus-nest/api"
+  }
+}

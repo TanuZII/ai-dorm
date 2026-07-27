@@ -1,0 +1,21 @@
+const tabs = [
+  ['overview', 'ภาพรวม'],
+  ['invoices', 'ใบแจ้งหนี้'],
+  ['payments', 'รับชำระ'],
+  ['bank', 'ธนาคาร'],
+  ['rates', 'อัตราและค่าธรรมเนียม'],
+  ['reports', 'รายงาน'],
+]
+
+function FinanceTabs({ active, onChange }) {
+  return <div className="overflow-x-auto border-b border-[#dfe7eb]">
+    <div className="flex min-w-max gap-6 px-5">
+      {tabs.map(([id, label]) => <button key={id} onClick={() => onChange(id)} className={`relative py-3 text-xs font-medium transition ${active === id ? 'text-[#173653]' : 'text-[#778997] hover:text-[#39536a]'}`}>
+        {label}
+        {active === id && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-[#f0b72d]" />}
+      </button>)}
+    </div>
+  </div>
+}
+
+export default FinanceTabs

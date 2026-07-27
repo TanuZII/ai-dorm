@@ -1,0 +1,217 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { createDb } from '../src/db.js'
+import { createApp } from '../src/app.js'
+
+test('critical dormitory backend flows', async (t) => {
+  const db = createDb(':memory:')
+  const server = createApp({ db }).listen(0, '127.0.0.1')
+  await new Promise(resolve => server.once('listening', resolve))
+  const base = `http://127.0.0.1:${server.address().port}/api`
+  let token = ''
+
+  async function api(path, options = {}) {
+    const response = await fetch(`${base}${path}`, {
+      ...options,
+      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...options.headers },
+      body: options.body && typeof options.body !== 'string' ? JSON.stringify(options.body) : options.body,
+    })
+    const body = response.status === 204 ? null : await response.json()
+    return { response, body }
+  }
+
+  t.after(() => { server.close(); db.close() })
+
+  await t.test('login and RBAC identity', async () => {
+    const { response, body } = await api('/auth/login', { method: 'POST', body: { username: 'admin', password: 'Admin@1234' } })
+    assert.equal(response.status, 200)
+    assert.ok(body.token)
+    assert.ok(body.user.permissions.includes('finance.cancel'))
+    token = body.token
+  })
+
+  await t.test('master data and rate policies are seeded and cancellable with reason', async () => {
+    const tenantTypes = await api('/master-data/tenant_type')
+    assert.equal(tenantTypes.response.status, 200)
+    assert.equal(tenantTypes.body.length, 5)
+    const created = await api('/master-data/tenant_type', { method: 'POST', body: { code: 'VISITING', name: 'อาจารย์ผู้มาเยือน' } })
+    assert.equal(created.response.status, 201)
+    const withoutReason = await api(`/master-data/tenant_type/${created.body.id}`, { method: 'DELETE', body: {} })
+    assert.equal(withoutReason.response.status, 400)
+    const cancelled = await api(`/master-data/tenant_type/${created.body.id}`, { method: 'DELETE', body: { reason: 'ยกเลิกตามประกาศประเภทผู้เช่าใหม่' } })
+    assert.equal(cancelled.response.status, 204)
+    const policies = await api('/rate-policies')
+    assert.equal(policies.response.status, 200)
+    assert.ok(policies.body.some(item => item.code === 'ST68_TERM' && item.amount === 8000))
+    const imported = await api('/master-data/province/import', { method: 'POST', body: { rows: [{ code: '10', name: 'กรุงเทพมหานคร' }] } })
+    assert.equal(imported.response.status, 201)
+    assert.equal(imported.body.imported, 1)
+  })
+
+  let tenantId
+  await t.test('create tenant and portal account with password policy', async () => {
+    const created = await api('/tenants', { method: 'POST', body: { tenantCode: 'ST690001', tenantType: 'student', firstName: 'สมหญิง', lastName: 'เรียนดี', email: 'student@example.test', currentAddress: 'มหาวิทยาลัยตัวอย่าง' } })
+    assert.equal(created.response.status, 201)
+    tenantId = created.body.id
+
+    const weak = await api(`/tenants/${tenantId}/portal-account`, { method: 'POST', body: { username: 'st690001', password: 'short' } })
+    assert.equal(weak.response.status, 400)
+    const missingUppercase = await api(`/tenants/${tenantId}/portal-account`, { method: 'POST', body: { username: 'st690001', password: 'student@123' } })
+    assert.equal(missingUppercase.response.status, 400)
+    const valid = await api(`/tenants/${tenantId}/portal-account`, { method: 'POST', body: { username: 'st690001', password: 'Student@123' } })
+    assert.equal(valid.response.status, 201)
+    assert.equal(valid.body.tenant_id, tenantId)
+  })
+
+  let invoiceId
+  let receiptId
+  await t.test('issue invoice, receive payment and issue receipt', async () => {
+    const invoice = await api('/invoices', { method: 'POST', body: { tenantId, dueDate: '2026-08-15', items: [
+      { itemType: 'room', description: 'ค่าห้องพัก ภาคเรียน 1/2569', quantity: 1, unitPrice: 8500 },
+      { itemType: 'deposit', description: 'เงินประกันห้องพัก', quantity: 1, unitPrice: 3000 },
+    ] } })
+    assert.equal(invoice.response.status, 201)
+    assert.equal(invoice.body.total, 11500)
+    invoiceId = invoice.body.id
+
+    const payment = await api('/payments', { method: 'POST', body: { invoiceId, amount: 11500, method: 'transfer', referenceNo: 'TX-001' } })
+    assert.equal(payment.response.status, 201)
+    assert.match(payment.body.receipt.receipt_no, /^RC-/)
+    receiptId = payment.body.receipt.id
+  })
+
+  await t.test('cancellation reason is mandatory and audit is retained', async () => {
+    const noReason = await api(`/receipts/${receiptId}/cancel`, { method: 'POST', body: { reason: '' } })
+    assert.equal(noReason.response.status, 400)
+
+    const cancelled = await api(`/receipts/${receiptId}/cancel`, { method: 'POST', body: { reason: 'ผู้ชำระโอนยอดผิดบัญชี' } })
+    assert.equal(cancelled.response.status, 200)
+    assert.equal(cancelled.body.status, 'cancelled')
+
+    const invoiceCancelled = await api(`/invoices/${invoiceId}/cancel`, { method: 'POST', body: { reason: 'ออกเอกสารผิดภาคการศึกษา' } })
+    assert.equal(invoiceCancelled.response.status, 200)
+    assert.equal(invoiceCancelled.body.status, 'cancelled')
+
+    const logs = await api('/audit-logs?entityType=invoice')
+    assert.equal(logs.response.status, 200)
+    assert.ok(logs.body.some(log => log.action === 'CREATE'))
+    assert.ok(logs.body.some(log => log.action === 'CANCEL'))
+  })
+
+  await t.test('room status requires a reason when damaged', async () => {
+    const rooms = await api('/rooms')
+    const room = rooms.body[0]
+    const invalid = await api(`/rooms/${room.id}/status`, { method: 'PATCH', body: { status: 'damaged' } })
+    assert.equal(invalid.response.status, 400)
+    const valid = await api(`/rooms/${room.id}/status`, { method: 'PATCH', body: { status: 'damaged', reason: 'ระบบไฟฟ้าขัดข้อง' } })
+    assert.equal(valid.response.status, 200)
+    assert.equal(valid.body.status, 'damaged')
+  })
+
+  let occupiedRoomId
+  await t.test('availability, reservation, transfer, meter billing and checkout flow', async () => {
+    const available = await api('/beds?availability=available&bedCount=2')
+    assert.equal(available.response.status, 200)
+    assert.ok(available.body.length > 1)
+    const firstBed = available.body[0]
+    const reserved = await api('/reservations', { method: 'POST', body: { tenantId, scope: 'bed', roomId: firstBed.room_id, bedId: firstBed.id, startsAt: '2026-08-01', endsAt: '2026-12-31' } })
+    assert.equal(reserved.response.status, 201)
+    assert.match(reserved.body.reservation_no, /^RSV-/)
+    const occupied = await api(`/beds/${firstBed.id}/status`, { method: 'PATCH', body: { status: 'occupied', tenantId } })
+    assert.equal(occupied.response.status, 200)
+    const missing = await api('/contracts/missing')
+    assert.ok(missing.body.some(item => item.id === tenantId))
+    const contract = await api('/contracts', { method: 'POST', body: { contractNo: 'CT-690001', tenantId, bedId: firstBed.id, contractType: 'STUDENT_TERM', contractDate: '2026-07-30', rentalPeriod: 'term', startsAt: '2026-08-01', endsAt: '2026-12-31', advanceRent: 8000, minimumTermMonths: 4, depositAmount: 2000 } })
+    assert.equal(contract.response.status, 201)
+    assert.equal(contract.body.document_status, 'draft')
+    const sent = await api(`/contracts/${contract.body.id}/send`, { method: 'POST', body: {} })
+    assert.equal(sent.response.status, 200)
+    assert.equal(sent.body.email_status, 'queued')
+    const pending = await api('/contracts/pending-signatures')
+    assert.ok(pending.body.some(item => item.id === contract.body.id))
+
+    const tenantLogin = await api('/auth/login', { method: 'POST', body: { username: 'st690001', password: 'Student@123' } })
+    token = tenantLogin.body.token
+    const ownContracts = await api('/contracts')
+    assert.equal(ownContracts.response.status, 200)
+    assert.equal(ownContracts.body.length, 1)
+    const wrongSignature = await api(`/contracts/${contract.body.id}/sign`, { method: 'POST', body: { password: 'Wrong@123', confirmed: true } })
+    assert.equal(wrongSignature.response.status, 401)
+    const signed = await api(`/contracts/${contract.body.id}/sign`, { method: 'POST', body: { password: 'Student@123', confirmed: true } })
+    assert.equal(signed.response.status, 200)
+    assert.equal(signed.body.document_status, 'signed')
+    const pdfResponse = await fetch(`${base}/contracts/${contract.body.id}/document`, { headers: { authorization: `Bearer ${token}` } })
+    assert.equal(pdfResponse.status, 200)
+    assert.equal(pdfResponse.headers.get('content-type'), 'application/pdf')
+    const pdf = Buffer.from(await pdfResponse.arrayBuffer())
+    assert.equal(pdf.subarray(0, 4).toString(), '%PDF')
+    assert.ok(pdf.length > 5000)
+
+    const adminLogin = await api('/auth/login', { method: 'POST', body: { username: 'admin', password: 'Admin@1234' } })
+    token = adminLogin.body.token
+    const expiryAlerts = await api('/contracts/alerts?asOf=2026-12-01')
+    assert.ok(expiryAlerts.body.some(item => item.id === contract.body.id && item.days_remaining === 30))
+    const immutable = await api(`/contracts/${contract.body.id}`, { method: 'PATCH', body: { endsAt: '2027-01-31' } })
+    assert.equal(immutable.response.status, 409)
+
+    const afterReserve = await api('/beds?availability=available&bedCount=2')
+    const target = afterReserve.body.find(x => x.room_id !== firstBed.room_id)
+    const moved = await api('/room-transfers', { method: 'POST', body: { tenantId, toBedId: target.id, transferDate: '2026-08-10', reason: 'ย้ายตามคำร้องของผู้พักอาศัย' } })
+    assert.equal(moved.response.status, 201)
+    occupiedRoomId = target.room_id
+
+    const meter = await api('/meter-readings', { method: 'POST', body: { roomId: target.room_id, utilityType: 'electricity', billingMonth: '2026-08', previousReading: 100, currentReading: 110, unitRate: 7, dueDate: '2026-09-05', issueInvoices: true } })
+    assert.equal(meter.response.status, 201)
+    assert.equal(meter.body.amount_per_bed, 35)
+    assert.equal(meter.body.invoice_ids.length, 1)
+
+    const checkout = await api('/checkouts', { method: 'POST', body: { tenantId, checkoutDate: '2026-08-31', damageDetail: 'โต๊ะมีรอยขีดข่วน', damageAmount: 500 } })
+    assert.equal(checkout.response.status, 201)
+    assert.equal(checkout.body.refund_amount, 1500)
+    assert.ok(checkout.body.outstanding_debt >= 35)
+    const inspected = await api(`/rooms/${target.room_id}/readiness`, { method: 'POST', body: { ready: true, checklist: { cleanliness: true, electricity: true, water: true, furniture: true } } })
+    assert.equal(inspected.response.status, 200)
+    assert.equal(inspected.body.readiness_status, 'ready')
+  })
+
+  let inventoryItemId
+  await t.test('inventory cannot be overdrawn', async () => {
+    const item = await api('/inventory', { method: 'POST', body: { sku: 'LINEN-001', name: 'ผ้าปูที่นอน', category: 'dormitory', unit: 'ผืน', quantity: 10, reorderLevel: 3 } })
+    assert.equal(item.response.status, 201)
+    inventoryItemId = item.body.id
+    const overdraw = await api(`/inventory/${item.body.id}/movements`, { method: 'POST', body: { type: 'out', quantity: 11, reference: 'เบิกประจำเดือน' } })
+    assert.equal(overdraw.response.status, 400)
+    const movement = await api(`/inventory/${item.body.id}/movements`, { method: 'POST', body: { type: 'out', quantity: 4, reference: 'เบิกประจำเดือน' } })
+    assert.equal(movement.response.status, 200)
+    assert.equal(movement.body.quantity, 6)
+  })
+
+  await t.test('repair timeline, parts usage and close workflow', async () => {
+    const repair = await api('/repairs', { method: 'POST', body: { roomId: occupiedRoomId, title: 'หลอดไฟไม่ทำงาน', detail: 'ผู้เช่าแจ้งผ่านเจ้าหน้าที่', priority: 'normal', source: 'staff', tenantId } })
+    assert.equal(repair.response.status, 201)
+    for (const update of [
+      { status: 'repairing', detail: 'ช่างเข้าตรวจสอบ' },
+      { status: 'waiting_parts', detail: 'รอเบิกอุปกรณ์' },
+    ]) {
+      const result = await api(`/repairs/${repair.body.id}/updates`, { method: 'POST', body: update })
+      assert.equal(result.response.status, 200)
+    }
+    const usage = await api(`/repairs/${repair.body.id}/inventory-usage`, { method: 'POST', body: { itemId: inventoryItemId, quantity: 1 } })
+    assert.equal(usage.response.status, 201)
+    const completed = await api(`/repairs/${repair.body.id}/updates`, { method: 'POST', body: { status: 'completed', detail: 'เปลี่ยนหลอดไฟและทดสอบแล้ว' } })
+    assert.equal(completed.response.status, 200)
+    const closed = await api(`/repairs/${repair.body.id}/updates`, { method: 'POST', body: { status: 'closed', detail: 'เจ้าหน้าที่ตรวจรับและปิดงาน' } })
+    assert.equal(closed.response.status, 200)
+    const detail = await api(`/repairs/${repair.body.id}`)
+    assert.equal(detail.response.status, 200)
+    assert.equal(detail.body.workflow_status, 'closed')
+    assert.equal(detail.body.updates.length, 5)
+    assert.equal(detail.body.inventoryUsage.length, 1)
+  })
+
+  await t.test('contract report is available', async () => {
+    const contracts = await api('/reports/contracts')
+    assert.equal(contracts.response.status, 200)
+    assert.ok(contracts.body.some(item => item.contract_no === 'CT-690001' && item.status === 'expired'))
+  })
+})
