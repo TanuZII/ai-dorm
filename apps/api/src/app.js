@@ -22,7 +22,7 @@ const passwordSchema = z.string().min(8, 'รหัสผ่านต้อง�
   .regex(/[^A-Za-z0-9]/, 'ต้องมีอักขระพิเศษอย่างน้อย 1 ตัว')
 const idSchema = z.coerce.number().int().positive()
 const loginAttempts = new Map()
-const masterCategories = new Set(['title','country','province','district','subdistrict','tenant_type','room_type','building','room','bed','academic_year','rental_type','contract_type','fee_type','faculty','major'])
+const masterCategories = new Set(['title','country','province','district','subdistrict','tenant_type','room_type','building','floor','room','bed','academic_year','rental_type','contract_type','fee_type','faculty','major'])
 
 function validate(schema, value) {
   const result = schema.safeParse(value)

@@ -1,26 +1,114 @@
-import { useMemo, useState } from 'react'
-import { AlertTriangle, Building2, CalendarDays, ChevronRight, CircleDollarSign, Edit3, GraduationCap, Layers3, MapPinned, Plus, Search, Settings2, Users } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Building2, ChevronRight, GraduationCap, Layers3, LoaderCircle, MapPinned, Plus, Search, Settings2, X } from 'lucide-react'
+import { api } from '../../services/api'
 
-const catalogs={
- general:[['คำนำหน้าชื่อ','3 รายการ','นาย, นาง, นางสาว'],['ประเทศ','1 รายการ','ประเทศไทย'],['ประเภทผู้เช่า','5 รายการ','นักศึกษา, บุคลากร, ศิษย์เก่า, ภายนอก, อื่นๆ'],['ประเภทการเช่า','4 รายการ','รายวัน, รายเดือน, รายภาคเรียน, รายปี'],['ประเภทสัญญา','4 รายการ','แยกตามกลุ่มและรอบต่อสัญญา'],['รายการค่าธรรมเนียม','6 รายการ','ค่าห้อง, น้ำ, ไฟ, ค่าปรับ, ความเสียหาย, อื่นๆ']],
- location:[['จังหวัด','พร้อมนำเข้า','รอชุดข้อมูลที่อยู่มาตรฐาน'],['อำเภอ / เขต','พร้อมนำเข้า','ผูกกับจังหวัดด้วย parent code'],['ตำบล / แขวง','พร้อมนำเข้า','ผูกกับอำเภอด้วย parent code'],['รหัสไปรษณีย์','พร้อมนำเข้า','เก็บในรายละเอียดของตำบล']],
- space:[['ประเภทห้อง','8 รายการ','ห้องพัก, ห้องชุด, ห้องไฟ, สำนักงาน ฯลฯ'],['อาคาร','3 อาคาร','อาคารปราโมทย์ 1–3'],['ชั้น','12 ชั้น','ผูกกับอาคาร'],['ห้อง','184 ห้อง','ชื่อห้อง, เลขที่ห้อง, ประเภท'],['เตียง','320 เตียง','ลำดับเตียงภายในห้อง'],['ปีการศึกษา','4 ปี','ปีและภาคเรียนที่เปิดใช้งาน']],
- education:[['คณะครุศาสตร์','2 สาขา','การศึกษาปฐมวัย, การประถมศึกษา'],['โรงเรียนการเรือน','2 สาขา','คหกรรมศาสตร์, เทคโนโลยีการประกอบอาหาร'],['โรงเรียนการท่องเที่ยวและบริการ','1 สาขา','ธุรกิจการบิน'],['คณะวิทยาศาสตร์และเทคโนโลยี','1 สาขา','วิทยาศาสตร์เครื่องสำอาง']]
+const fieldClass = 'h-10 w-full rounded-xl border border-[#d7e1e7] bg-white px-3 text-xs outline-none transition focus:border-[#4c8fc8] focus:ring-2 focus:ring-[#4c8fc8]/15'
+const categoryConfig = {
+  title: { label: 'คำนำหน้าชื่อ', hint: 'นาย, นาง, นางสาว' },
+  country: { label: 'ประเทศ', hint: 'ประเทศตามข้อมูลที่อยู่มาตรฐาน' },
+  province: { label: 'จังหวัด', hint: 'จังหวัดของประเทศไทย' },
+  district: { label: 'อำเภอ / เขต', hint: 'ผูกกับจังหวัด', parent: 'province' },
+  subdistrict: { label: 'ตำบล / แขวง', hint: 'ผูกกับอำเภอ พร้อมรหัสไปรษณีย์', parent: 'district', postalCode: true },
+  tenant_type: { label: 'ประเภทผู้เช่า', hint: 'นักศึกษา บุคลากร บุคคลภายนอก และอื่น ๆ' },
+  rental_type: { label: 'ประเภทการเช่า', hint: 'รายวัน รายเดือน รายภาคเรียน และรายปี' },
+  contract_type: { label: 'ประเภทสัญญา', hint: 'ประเภทสัญญาตามกลุ่มผู้เช่า' },
+  fee_type: { label: 'รายการค่าธรรมเนียม', hint: 'ค่าห้อง น้ำ ไฟ ค่าปรับ และค่าอื่น ๆ' },
+  room_type: { label: 'ประเภทห้อง', hint: 'ห้องพัก ห้องชุด สำนักงาน และพื้นที่ส่วนกลาง' },
+  building: { label: 'อาคาร', hint: 'อาคารภายในโครงการหอพัก' },
+  floor: { label: 'ชั้น', hint: 'ชั้นภายในอาคาร', parent: 'building' },
+  room: { label: 'ห้อง', hint: 'หมายเลขและชื่อห้อง', parent: 'floor' },
+  bed: { label: 'เตียง', hint: 'ลำดับเตียงภายในห้อง', parent: 'room' },
+  academic_year: { label: 'ปีการศึกษา', hint: 'ปีและภาคเรียนที่เปิดใช้งาน' },
+  faculty: { label: 'คณะ / โรงเรียน', hint: 'หน่วยงานต้นสังกัดของนักศึกษา' },
+  major: { label: 'สาขาวิชา', hint: 'สาขาวิชาที่ผูกกับคณะ', parent: 'faculty' },
 }
-const policies=[
- {code:'ST68_TERM',name:'นักศึกษา รหัส 68+ · รายภาคเรียน',cohort:'นักศึกษา 68+',period:'ภาคเรียน',scope:'ต่อคน',rent:8000,split:2,water:23,electric:7,deposit:2000,due:5,late:100,debt:2,rule:'ค้างค่าสาธารณูปโภค 2 เดือน ยุติการเช่า'},
- {code:'ST68_YEAR',name:'นักศึกษา รหัส 68+ · รายปี',cohort:'นักศึกษา 68+',period:'รายปี',scope:'ต่อคน',rent:16000,split:2,water:23,electric:7,deposit:2000,due:5,late:100,debt:2,rule:'2 ภาคเรียน · ต่อสัญญารายปี'},
- {code:'ST68_SUMMER',name:'นักศึกษา รหัส 68+ · ภาคฤดูร้อน',cohort:'นักศึกษา 68+',period:'ภาคเรียน 3',scope:'ต่อคน',rent:6000,split:2,water:23,electric:7,deposit:2000,due:5,late:100,debt:2,rule:'ค่าสาธารณูปโภคหารตามผู้พัก'},
- {code:'ST68_ROOM',name:'นักศึกษา รหัส 68+ · เหมาห้อง',cohort:'นักศึกษา 68+',period:'ภาคเรียน',scope:'ต่อห้อง',rent:14000,split:1,water:23,electric:7,deposit:2000,due:5,late:100,debt:2,rule:'ค่าสาธารณูปโภคตามที่ใช้จริง ไม่หาร'},
- {code:'ST64_MONTH',name:'นักศึกษา รหัส 64–67 · รายเดือน',cohort:'นักศึกษา 64–67',period:'รายเดือน',scope:'ต่อคน',rent:2000,split:2,water:23,electric:7,deposit:2000,due:5,late:100,debt:2,rule:'ต่อสัญญารายเดือน'},
- {code:'STAFF_MONTH',name:'บุคลากร มสด. · รายเดือน',cohort:'บุคลากร',period:'รายเดือน',scope:'ต่อคน',rent:2000,split:2,water:23,electric:7,deposit:2000,due:5,late:100,debt:1,rule:'ค้างเกิน 1 เดือน มีสิทธิ์บอกเลิกสัญญา'},
- {code:'EXT_MONTH',name:'บุคคลภายนอก · รายเดือน',cohort:'บุคคลภายนอก',period:'รายเดือน',scope:'ต่อห้อง',rent:5000,split:1,water:23,electric:7,deposit:2000,due:5,late:100,debt:1,rule:'พักไม่เกิน 2 คน · ค่าสาธารณูปโภคตามจริง'},
-]
+const groups = {
+  general: { label: 'ข้อมูลทั่วไป', icon: Layers3, categories: ['title', 'country', 'tenant_type', 'rental_type', 'contract_type', 'fee_type'] },
+  location: { label: 'ที่อยู่ประเทศไทย', icon: MapPinned, categories: ['province', 'district', 'subdistrict'] },
+  space: { label: 'อาคาร ห้อง และเตียง', icon: Building2, categories: ['room_type', 'building', 'floor', 'room', 'bed', 'academic_year'] },
+  education: { label: 'คณะและสาขาวิชา', icon: GraduationCap, categories: ['faculty', 'major'] },
+}
+const tabs = [['catalog', 'ข้อมูลอ้างอิง'], ['space', 'อาคาร ห้อง และเตียง'], ['policy', 'นโยบายค่าเช่า'], ['education', 'คณะและสาขา']]
 
-function MasterData({notify}){const[tab,setTab]=useState('catalog');const[category,setCategory]=useState('general');const[query,setQuery]=useState('');const[cohort,setCohort]=useState('ทั้งหมด');const rows=useMemo(()=>catalogs[category].filter(x=>x[0].includes(query)||x[2].includes(query)),[category,query]);const policyRows=policies.filter(x=>cohort==='ทั้งหมด'||x.cohort===cohort)
-return <div className="enter-up space-y-5"><section className="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><div className="flex items-center gap-2 text-[10px] font-medium text-[#41749e]"><Settings2 size={13}/> ศูนย์ข้อมูลพื้นฐาน</div><h2 className="mt-1 text-[25px] font-semibold text-[#152c46]">กำหนดครั้งเดียว ใช้ร่วมกันทั้งระบบ</h2><p className="mt-1 text-xs text-[#748594]">ข้อมูลอ้างอิง โครงสร้างหอพัก และนโยบายค่าเช่าแบบมีช่วงเวลาบังคับใช้</p></div><button onClick={()=>notify(tab==='policy'?'เปิดแบบฟอร์มนโยบายใหม่':'เปิดแบบฟอร์มข้อมูลพื้นฐานใหม่')} className="flex items-center gap-2 rounded-xl bg-[#f5bf3c] px-4 py-2.5 text-xs font-semibold text-[#173653]"><Plus size={16}/> {tab==='policy'?'เพิ่มนโยบาย':'เพิ่มข้อมูล'}</button></section>
-<section className="overflow-hidden rounded-2xl border border-[#dfe7eb] bg-white"><div className="flex overflow-x-auto border-b border-[#e4eaee] px-5">{[['catalog','ข้อมูลอ้างอิง'],['space','อาคาร ห้อง และเตียง'],['policy','นโยบายค่าเช่า'],['education','คณะและสาขา']].map(x=><button key={x[0]} onClick={()=>{setTab(x[0]);if(x[0]==='space')setCategory('space');if(x[0]==='education')setCategory('education')}} className={`relative min-w-max px-4 py-3 text-xs ${tab===x[0]?'font-medium text-[#173653]':'text-[#748594]'}`}>{x[1]}{tab===x[0]&&<span className="absolute inset-x-3 bottom-0 h-0.5 bg-[#f0b72d]"/>}</button>)}</div>
-{tab!=='policy'?<div className="grid min-h-[520px] md:grid-cols-[220px_1fr]"><aside className="border-r border-[#e7edf0] bg-[#f8fafb] p-3">{tab==='catalog'&&[['general','ข้อมูลทั่วไป',Layers3],['location','ที่อยู่ประเทศไทย',MapPinned]].map(([id,label,I])=><button key={id} onClick={()=>setCategory(id)} className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-xs ${category===id?'bg-white font-medium text-[#294259] shadow-sm':'text-[#697d8d]'}`}><I size={15}/>{label}<ChevronRight size={13} className="ml-auto"/></button>)}{tab==='space'&&<div className="rounded-xl bg-white p-3 shadow-sm"><Building2 size={18} className="text-[#397caf]"/><p className="mt-2 text-xs font-medium">โครงสร้างพื้นที่</p><p className="mt-1 text-[9px] leading-4 text-[#7b8c99]">อาคาร → ชั้น → ห้อง → เตียง</p></div>}{tab==='education'&&<div className="rounded-xl bg-white p-3 shadow-sm"><GraduationCap size={18} className="text-[#397caf]"/><p className="mt-2 text-xs font-medium">โครงสร้างการศึกษา</p><p className="mt-1 text-[9px] leading-4 text-[#7b8c99]">คณะ → สาขาวิชา</p></div>}</aside><div className="p-5"><div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center"><div><h3 className="text-sm font-semibold">{tab==='space'?'อาคาร ห้อง และเตียง':tab==='education'?'คณะและสาขาวิชา':category==='location'?'ข้อมูลที่อยู่':'ข้อมูลทั่วไป'}</h3><p className="text-[10px] text-[#81909c]">ข้อมูลที่ถูกใช้แล้วให้ยกเลิกใช้งานพร้อมระบุเหตุผล</p></div><label className="flex h-9 items-center gap-2 rounded-xl border border-[#d8e2e7] px-3 sm:ml-auto"><Search size={14}/><input value={query} onChange={e=>setQuery(e.target.value)} className="w-44 text-[11px] outline-none" placeholder="ค้นหาหมวดหรือรายละเอียด"/></label></div><div className="grid gap-3 lg:grid-cols-2">{rows.map((row,index)=><button key={row[0]} onClick={()=>notify(`เปิดจัดการ ${row[0]}`)} className="group rounded-2xl border border-[#dce6eb] p-4 text-left hover:border-[#abc4d3] hover:shadow-sm"><div className="flex items-start justify-between"><div className="grid size-9 place-items-center rounded-xl bg-[#eef4f8] text-[#527994]"><Layers3 size={16}/></div><span className="rounded-full bg-[#edf7f4] px-2.5 py-1 text-[9px] text-[#2f7d68]">ใช้งาน</span></div><h4 className="mt-3 text-sm font-semibold">{row[0]}</h4><p className="mt-1 text-[10px] text-[#778997]">{row[2]}</p><div className="mt-3 flex items-center justify-between border-t border-[#edf1f3] pt-3"><span className="font-['IBM_Plex_Sans'] text-[10px] font-medium text-[#4e687c]">{row[1]}</span><Edit3 size={13} className="text-[#91a0ab] group-hover:text-[#397caf]"/></div></button>)}</div></div></div>
-:<div className="p-5"><div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end"><div><h3 className="text-sm font-semibold">นโยบายจัดเก็บค่าเช่าและค่าธรรมเนียม</h3><p className="mt-0.5 text-[10px] text-[#81909c]">อัตราปัจจุบันมีผลตั้งแต่ 1 มิถุนายน 2569 · แก้ไขผ่านการสร้างเวอร์ชันใหม่</p></div><select value={cohort} onChange={e=>setCohort(e.target.value)} className="h-9 rounded-xl border border-[#d8e2e7] px-3 text-[11px] md:ml-auto"><option>ทั้งหมด</option><option>นักศึกษา 68+</option><option>นักศึกษา 64–67</option><option>บุคลากร</option><option>บุคคลภายนอก</option></select></div><div className="space-y-3">{policyRows.map(policy=><article key={policy.code} className="overflow-hidden rounded-2xl border border-[#dce6eb]"><div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center"><div className="flex min-w-[270px] items-center gap-3"><div className="grid size-10 place-items-center rounded-xl bg-[#edf5fb] text-[#397caf]"><Users size={18}/></div><div><p className="font-['IBM_Plex_Sans'] text-[9px] font-semibold text-[#6f8291]">{policy.code}</p><h4 className="text-xs font-semibold text-[#294259]">{policy.name}</h4><p className="mt-0.5 text-[9px] text-[#82919d]">{policy.period} · {policy.scope}</p></div></div><div className="grid flex-1 grid-cols-3 gap-2 sm:grid-cols-6">{[['ค่าเช่า',`฿${policy.rent.toLocaleString()}`],['ค่าน้ำ',`฿${policy.water}/หน่วย`],['ค่าไฟ',`฿${policy.electric}/หน่วย`],['เงินประกัน',`฿${policy.deposit.toLocaleString()}`],['ครบกำหนด',`วันที่ ${policy.due}`],['ค่าปรับ',`฿${policy.late}`]].map(x=><div key={x[0]} className="rounded-xl bg-[#f7f9fa] px-2 py-2 text-center"><p className="text-[8px] text-[#81909c]">{x[0]}</p><p className="mt-1 font-['IBM_Plex_Sans'] text-[10px] font-semibold">{x[1]}</p></div>)}</div><button onClick={()=>notify(`แก้ไขนโยบาย ${policy.name}`)} className="grid size-9 place-items-center rounded-xl border border-[#d8e2e7] text-[#6c8191]"><Edit3 size={14}/></button></div><div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[#e8edf0] bg-[#fbfcfd] px-4 py-2.5 text-[9px] text-[#677c8d]"><span>ผู้พักไม่เกิน 2 คน</span><span>ค่าสาธารณูปโภค {policy.split===2?'หาร 2':'ตามจริง ไม่หาร'}</span><span className="flex items-center gap-1 text-[#9a6210]"><AlertTriangle size={11}/>{policy.rule}</span><span className="ml-auto rounded-full bg-[#edf7f4] px-2 py-1 text-[#2f7d68]">ใช้งาน</span></div></article>)}</div></div>}
-</section></div>}
+function MasterData({ notify, user }) {
+  const canManage = user?.permissions?.includes('master.manage')
+  const [tab, setTab] = useState('catalog')
+  const [group, setGroup] = useState('general')
+  const [category, setCategory] = useState('title')
+  const [rows, setRows] = useState([])
+  const [parents, setParents] = useState([])
+  const [policies, setPolicies] = useState([])
+  const [query, setQuery] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [editor, setEditor] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    if (tab !== 'policy') { setRows([]); setParents([]) }
+    try {
+      if (tab === 'policy') {
+        setPolicies(await api('/rate-policies'))
+      } else {
+        const config = categoryConfig[category]
+        const [items, parentItems] = await Promise.all([api(`/master-data/${category}`), config.parent ? api(`/master-data/${config.parent}`) : Promise.resolve([])])
+        setRows(items)
+        setParents(parentItems.filter(item => item.active))
+      }
+    } catch (error) { notify(error.message) }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { load() }, [tab, category])
+
+  const selectTab = id => {
+    setTab(id)
+    setQuery('')
+    if (id === 'catalog') { setGroup('general'); setCategory('title') }
+    if (id === 'space') { setGroup('space'); setCategory('room_type') }
+    if (id === 'education') { setGroup('education'); setCategory('faculty') }
+  }
+  const selectGroup = id => { setGroup(id); setCategory(groups[id].categories[0]); setQuery('') }
+  const filtered = useMemo(() => rows.filter(row => `${row.code} ${row.name} ${row.parent_name || ''}`.toLowerCase().includes(query.toLowerCase())), [rows, query])
+  const save = async payload => {
+    try {
+      const details = {}
+      if (payload.postalCode) details.postalCode = payload.postalCode
+      if (payload.note) details.note = payload.note
+      await api(`/master-data/${category}`, { method: 'POST', body: { code: payload.code.trim().toUpperCase(), name: payload.name.trim(), parentId: payload.parentId ? Number(payload.parentId) : null, details: Object.keys(details).length ? details : null } })
+      setEditor(false)
+      notify(`เพิ่ม${categoryConfig[category].label}แล้ว`)
+      await load()
+    } catch (error) { notify(error.message) }
+  }
+
+  return <div className="enter-up space-y-5">
+    <section className="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><div className="flex items-center gap-2 text-[10px] font-medium text-[#41749e]"><Settings2 size={13} /> ศูนย์ข้อมูลพื้นฐาน</div><h2 className="mt-1 text-[25px] font-semibold text-[#152c46]">กำหนดครั้งเดียว ใช้ร่วมกันทั้งระบบ</h2><p className="mt-1 text-xs text-[#748594]">เพิ่มข้อมูลอ้างอิงและโครงสร้างแบบลำดับชั้นจากฐานข้อมูลจริง</p></div>{tab !== 'policy' && canManage && <button onClick={() => setEditor(true)} className="action-primary"><Plus size={16} /> เพิ่ม{categoryConfig[category].label}</button>}</section>
+
+    <section className="overflow-hidden rounded-2xl border border-[#dfe7eb] bg-white"><div className="flex overflow-x-auto border-b border-[#e4eaee] px-5">{tabs.map(([id, label]) => <button key={id} onClick={() => selectTab(id)} className={`relative min-w-max px-4 py-3 text-xs ${tab === id ? 'font-medium text-[#173653]' : 'text-[#748594]'}`}>{label}{tab === id && <span className="absolute inset-x-3 bottom-0 h-0.5 bg-[#f0b72d]" />}</button>)}</div>
+      {tab === 'policy' ? <PolicyList rows={policies} loading={loading} /> : <div className="grid min-h-[520px] md:grid-cols-[240px_1fr]"><aside className="border-r border-[#e7edf0] bg-[#f8fafb] p-3">
+        {tab === 'catalog' && ['general', 'location'].map(id => <GroupButton key={id} id={id} active={group === id} select={selectGroup} />)}
+        {groups[group].categories.map(id => { const config = categoryConfig[id]; return <button key={id} onClick={() => { setCategory(id); setQuery('') }} className={`mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-[11px] ${category === id ? 'bg-white font-medium text-[#294259] shadow-sm' : 'text-[#697d8d]'}`}><span className={`size-1.5 rounded-full ${category === id ? 'bg-[#f0b72d]' : 'bg-[#bdc8cf]'}`} />{config.label}<ChevronRight size={13} className="ml-auto" /></button> })}
+      </aside><div className="p-5"><div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end"><div><h3 className="text-sm font-semibold">{categoryConfig[category].label}</h3><p className="mt-1 text-[10px] text-[#81909c]">{categoryConfig[category].hint} · พบ {rows.length} รายการ</p></div><label className="search sm:ml-auto"><Search size={14} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="ค้นหารหัสหรือชื่อ" /></label></div>
+        {loading ? <Loading /> : <MasterTable rows={filtered} />}
+      </div></div>}
+    </section>
+    {editor && <MasterDialog config={categoryConfig[category]} parents={parents} close={() => setEditor(false)} save={save} />}
+  </div>
+}
+
+function GroupButton({ id, active, select }) { const config = groups[id], Icon = config.icon; return <button onClick={() => select(id)} className={`mb-2 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-xs ${active ? 'bg-white font-medium text-[#294259] shadow-sm' : 'text-[#697d8d]'}`}><Icon size={15} />{config.label}<ChevronRight size={13} className="ml-auto" /></button> }
+function MasterTable({ rows }) { return <div className="overflow-x-auto rounded-xl border border-[#e0e8ec]"><table className="w-full min-w-[620px] text-left text-[11px]"><thead className="bg-[#f5f8f9] text-[#718392]"><tr><th className="px-4 py-3 font-medium">รหัส</th><th className="px-4 py-3 font-medium">ชื่อรายการ</th><th className="px-4 py-3 font-medium">ข้อมูลแม่</th><th className="px-4 py-3 font-medium">รายละเอียด</th><th className="px-4 py-3 font-medium">สถานะ</th></tr></thead><tbody className="divide-y divide-[#edf1f3]">{rows.map(row => <tr key={row.id}><td className="px-4 py-3 font-['IBM_Plex_Sans'] font-semibold text-[#36536a]">{row.code}</td><td className="px-4 py-3 font-medium text-[#294259]">{row.name}</td><td className="px-4 py-3 text-[#6e8291]">{row.parent_name || '—'}</td><td className="px-4 py-3 text-[#6e8291]">{row.details?.postalCode ? `รหัสไปรษณีย์ ${row.details.postalCode}` : row.details?.note || '—'}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[9px] ${row.active ? 'bg-[#edf7f4] text-[#2f7d68]' : 'bg-[#f1f3f5] text-[#778692]'}`}>{row.active ? 'ใช้งาน' : 'ยกเลิก'}</span></td></tr>)}</tbody></table>{rows.length === 0 && <p className="py-12 text-center text-xs text-[#82919c]">ยังไม่มีข้อมูลในหมวดนี้</p>}</div> }
+
+function PolicyList({ rows, loading }) { if (loading) return <Loading />; return <div className="p-5"><div className="mb-4"><h3 className="text-sm font-semibold">นโยบายจัดเก็บค่าเช่าและค่าธรรมเนียม</h3><p className="mt-1 text-[10px] text-[#81909c]">แก้ไขอัตราผ่านเมนูการเงิน เพื่อเก็บประวัติช่วงวันที่บังคับใช้</p></div><div className="grid gap-3 lg:grid-cols-2">{rows.map(row => <article key={row.id} className="rounded-2xl border border-[#dce6eb] p-4"><div className="flex items-start justify-between"><div><p className="font-['IBM_Plex_Sans'] text-[9px] font-semibold text-[#6f8291]">{row.code}</p><h4 className="mt-1 text-xs font-semibold">{row.name}</h4><p className="mt-1 text-[9px] text-[#82919d]">{row.tenant_cohort} · {row.rental_period}</p></div><span className="rounded-full bg-[#edf7f4] px-2 py-1 text-[9px] text-[#2f7d68]">ใช้งาน</span></div><div className="mt-4 grid grid-cols-3 gap-2"><PolicyValue label="ค่าเช่า" value={money(row.amount)} /><PolicyValue label="ค่าน้ำ / หน่วย" value={money(row.water_rate)} /><PolicyValue label="ค่าไฟ / หน่วย" value={money(row.electricity_rate)} /></div></article>)}</div></div> }
+function PolicyValue({ label, value }) { return <div className="rounded-xl bg-[#f7f9fa] p-2 text-center"><p className="text-[8px] text-[#81909c]">{label}</p><p className="mt-1 text-[10px] font-semibold">฿{value}</p></div> }
+
+function MasterDialog({ config, parents, close, save }) {
+  const [saving, setSaving] = useState(false)
+  const submit = async event => { event.preventDefault(); setSaving(true); try { await save(Object.fromEntries(new FormData(event.currentTarget))) } finally { setSaving(false) } }
+  return <div className="fixed inset-0 z-50 grid place-items-end bg-[#142a46]/45 sm:place-items-center sm:p-4" onMouseDown={event => event.target === event.currentTarget && close()}><form onSubmit={submit} className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"><div className="flex items-center border-b border-[#e5ebef] p-5"><div><p className="text-[10px] font-semibold text-[#397caf]">ข้อมูลพื้นฐาน</p><h3 className="mt-1 text-base font-semibold">เพิ่ม{config.label}</h3></div><button type="button" onClick={close} className="ml-auto grid size-9 place-items-center rounded-full bg-[#f2f5f7]"><X size={17} /></button></div><div className="grid gap-4 p-5"><Field label="รหัส"><input required name="code" maxLength="50" className={fieldClass} placeholder="เช่น B04" /></Field><Field label={`ชื่อ${config.label}`}><input required name="name" maxLength="300" className={fieldClass} /></Field>{config.parent && <Field label={`ข้อมูลแม่: ${categoryConfig[config.parent].label}`}><select required name="parentId" className={fieldClass}><option value="">เลือก{categoryConfig[config.parent].label}</option>{parents.map(parent => <option key={parent.id} value={parent.id}>{parent.code} · {parent.name}</option>)}</select>{parents.length === 0 && <p className="mt-1 text-[9px] text-[#b74e44]">ต้องเพิ่ม{categoryConfig[config.parent].label}ก่อน</p>}</Field>}{config.postalCode && <Field label="รหัสไปรษณีย์"><input name="postalCode" inputMode="numeric" maxLength="10" className={fieldClass} /></Field>}<Field label="รายละเอียดเพิ่มเติม (ถ้ามี)"><textarea name="note" rows="3" className={`${fieldClass} h-auto py-3`} /></Field></div><div className="flex gap-2 border-t border-[#e5ebef] p-4"><button type="button" onClick={close} className="flex-1 rounded-xl border border-[#d8e2e7] py-2.5 text-xs">ปิด</button><button disabled={saving || (config.parent && parents.length === 0)} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#f5bf3c] py-2.5 text-xs font-semibold text-[#173653] disabled:opacity-50">{saving && <LoaderCircle size={14} className="animate-spin" />} บันทึกข้อมูล</button></div></form></div>
+}
+
+function Field({ label, children }) { return <label><span className="mb-1.5 block text-[10px] font-medium text-[#617688]">{label}</span>{children}</label> }
+function Loading() { return <div className="grid min-h-48 place-items-center"><LoaderCircle className="animate-spin text-[#397caf]" /></div> }
+function money(value) { return Number(value || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
+
 export default MasterData

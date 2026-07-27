@@ -58,6 +58,11 @@ test('critical dormitory backend flows', async (t) => {
     const imported = await api('/master-data/province/import', { method: 'POST', body: { rows: [{ code: '10', name: 'กรุงเทพมหานคร' }] } })
     assert.equal(imported.response.status, 201)
     assert.equal(imported.body.imported, 1)
+    const buildings = await api('/master-data/building')
+    const floor = await api('/master-data/floor', { method: 'POST', body: { code: 'PRAMOTE1-F1', name: 'ชั้น 1', parentId: buildings.body.find(item => item.code === 'PRAMOTE1').id } })
+    assert.equal(floor.response.status, 201)
+    const floors = await api('/master-data/floor')
+    assert.ok(floors.body.some(item => item.code === 'PRAMOTE1-F1' && item.parent_name === 'อาคารปราโมทย์ 1'))
   })
 
   let tenantId

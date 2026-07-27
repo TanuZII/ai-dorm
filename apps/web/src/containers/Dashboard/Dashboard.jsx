@@ -95,7 +95,7 @@ function Dashboard({ user, onLogout }) {
 
       <main className="mx-auto max-w-[1500px] p-4 md:p-7">
         {active === 'การเงิน' ? <Finance notify={notify} user={user} />
-          : active === 'ข้อมูลพื้นฐาน' ? <MasterData notify={notify} />
+          : active === 'ข้อมูลพื้นฐาน' ? <MasterData notify={notify} user={user} />
           : active === 'อาคารและห้องพัก' || active === 'มิเตอร์น้ำ–ไฟ' ? <RoomOperations notify={notify} />
           : active === 'การจองและสัญญา' ? <ContractDesk user={user} notify={notify} />
           : active === 'Check-out และเงินประกัน' ? <CheckoutDesk notify={notify} />
