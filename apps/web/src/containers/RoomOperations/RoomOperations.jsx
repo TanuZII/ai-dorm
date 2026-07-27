@@ -45,6 +45,7 @@ function RoomOperations({ notify }) {
   useEffect(() => { load() }, [])
 
   const buildings = useMemo(() => [...new Map(rooms.map(x => [x.building_id, { id: x.building_id, name: x.building_name }])).values()], [rooms])
+  const floors = useMemo(() => [...new Set(rooms.filter(x => filters.buildingId === 'all' || x.building_id === Number(filters.buildingId)).map(x => x.floor_no))].sort((a,b) => a-b), [rooms, filters.buildingId])
   const visibleRooms = useMemo(() => rooms.filter(room =>
     (filters.buildingId === 'all' || room.building_id === Number(filters.buildingId)) &&
     (filters.floor === 'all' || room.floor_no === Number(filters.floor)) &&
@@ -82,7 +83,7 @@ function RoomOperations({ notify }) {
     {tab === 'availability' && <>
       <section className="grid gap-3 rounded-2xl border border-[#dfe7eb] bg-white p-4 md:grid-cols-2 xl:grid-cols-[1fr_140px_150px_1fr_auto]">
         <select value={filters.buildingId} onChange={e=>setFilters(x=>({...x,buildingId:e.target.value}))} className={fieldClass}><option value="all">ทุกอาคาร</option>{buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
-        <select value={filters.floor} onChange={e=>setFilters(x=>({...x,floor:e.target.value}))} className={fieldClass}><option value="all">ทุกชั้น</option>{[1,2,3,4].map(x=><option key={x} value={x}>ชั้น {x}</option>)}</select>
+        <select value={filters.floor} onChange={e=>setFilters(x=>({...x,floor:e.target.value}))} className={fieldClass}><option value="all">ทุกชั้น</option>{floors.map(x=><option key={x} value={x}>ชั้น {x}</option>)}</select>
         <select value={filters.bedCount} onChange={e=>setFilters(x=>({...x,bedCount:e.target.value}))} className={fieldClass}><option value="all">ทุกขนาดห้อง</option><option value="1">1 เตียง</option><option value="2">2 เตียง</option><option value="3">3 เตียง</option><option value="4">4 เตียง</option></select>
         <label className="flex h-10 items-center gap-2 rounded-xl border border-[#d7e1e7] px-3"><Search size={14} className="text-[#80909c]"/><input value={filters.search} onChange={e=>setFilters(x=>({...x,search:e.target.value}))} placeholder="ค้นหาเลขห้องหรือเตียง" className="w-full text-xs outline-none"/></label>
         <label className="flex items-center gap-2 whitespace-nowrap text-[11px] text-[#526b7e]"><input type="checkbox" checked={filters.availableOnly} onChange={e=>setFilters(x=>({...x,availableOnly:e.target.checked}))} className="size-4 accent-[#397caf]"/> เฉพาะที่พร้อมจอง</label>

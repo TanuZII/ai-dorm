@@ -320,6 +320,8 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
   ensureColumn(db, 'rooms', 'readiness_status', "TEXT NOT NULL DEFAULT 'ready'")
   ensureColumn(db, 'rooms', 'readiness_confirmed_at', 'TEXT')
   ensureColumn(db, 'rooms', 'readiness_confirmed_by', 'INTEGER')
+  ensureColumn(db, 'rooms', 'room_type', "TEXT NOT NULL DEFAULT 'residential'")
+  ensureColumn(db, 'rooms', 'room_name', 'TEXT')
   ensureColumn(db, 'repairs', 'source', "TEXT NOT NULL DEFAULT 'staff'")
   ensureColumn(db, 'repairs', 'tenant_id', 'INTEGER')
   ensureColumn(db, 'repairs', 'reporter_name', 'TEXT')
@@ -396,11 +398,64 @@ function seed(db) {
       db.prepare(`INSERT OR IGNORE INTO beds(room_id,bed_no) VALUES (?,'B')`).run(roomRow.id)
     }
   }
+  seedPramoteBuildings(db)
   db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('ROOM','ค่าห้องพัก',0)`).run()
   db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('DEPOSIT','เงินประกัน',3000)`).run()
   db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('LATE_FEE','ค่าปรับชำระล่าช้า',0)`).run()
   seedMasterData(db)
   seedRatePolicies(db)
+}
+
+function seedPramoteBuildings(db) {
+  const plans = [
+    { code:'PRAMOTE1', name:'อาคารปราโมทย์ 1', prefix:1, floors:[
+      { floor:1,total:29,residential:14 },
+      { floor:2,total:59,special:{ '1203':['prayer','ห้องละหมาด'], '1209':['electrical','ห้องไฟฟ้า'] } },
+      { floor:3,total:55,special:{ '1305':['electrical','ห้องไฟฟ้า'] } },
+      { floor:4,total:55,special:{ '1405':['electrical','ห้องไฟฟ้า'] } },
+      { floor:5,total:9,special:{ '1509':['electrical','ห้องไฟฟ้า'] } },
+    ]},
+    { code:'PRAMOTE2', name:'อาคารปราโมทย์ 2', prefix:2, floors:[
+      { floor:1,total:29,residential:18 },
+      { floor:2,total:59,special:{ '2203':['prayer','ห้องละหมาด'], '2209':['electrical','ห้องไฟฟ้า'] } },
+      { floor:3,total:55,special:{ '2305':['electrical','ห้องไฟฟ้า'] } },
+      { floor:4,total:55,special:{ '2405':['electrical','ห้องไฟฟ้า'] } },
+      { floor:5,total:9,special:{ '2509':['electrical','ห้องไฟฟ้า'] } },
+    ]},
+  ]
+  const addBuilding=db.prepare(`INSERT OR IGNORE INTO buildings(code,name) VALUES (?,?)`)
+  const addFloor=db.prepare(`INSERT OR IGNORE INTO floors(building_id,floor_no) VALUES (?,?)`)
+  const addRoom=db.prepare(`INSERT OR IGNORE INTO rooms(floor_id,room_no,status,reason,readiness_status,room_type,room_name) VALUES (?,?,?,?,'not_ready',?,?)`)
+  const addResidentialRoom=db.prepare(`INSERT OR IGNORE INTO rooms(floor_id,room_no,status,readiness_status,room_type,room_name) VALUES (?,?,'vacant','ready','residential','ห้องพัก')`)
+  const addBed=db.prepare(`INSERT OR IGNORE INTO beds(room_id,bed_no) VALUES (?,?)`)
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    for(const buildingPlan of plans){
+      addBuilding.run(buildingPlan.code,buildingPlan.name)
+      const building=db.prepare(`SELECT id FROM buildings WHERE code=?`).get(buildingPlan.code)
+      for(const floorPlan of buildingPlan.floors){
+        addFloor.run(building.id,floorPlan.floor)
+        const floor=db.prepare(`SELECT id FROM floors WHERE building_id=? AND floor_no=?`).get(building.id,floorPlan.floor)
+        let utilityIndex=0
+        for(let sequence=1;sequence<=floorPlan.total;sequence++){
+          const roomNo=`${buildingPlan.prefix}${floorPlan.floor}${String(sequence).padStart(2,'0')}`
+          const special=floorPlan.special?.[roomNo]
+          const residential=special?false:floorPlan.residential?sequence<=floorPlan.residential:true
+          if(residential)addResidentialRoom.run(floor.id,roomNo)
+          else{
+            const [type,name]=special||['utility',`ห้องใช้สอย ${++utilityIndex}`]
+            addRoom.run(floor.id,roomNo,'unavailable','พื้นที่ใช้สอย ไม่ใช่ห้องพัก',type,name)
+          }
+          const room=db.prepare(`SELECT id,room_type FROM rooms WHERE floor_id=? AND room_no=?`).get(floor.id,roomNo)
+          if(room.room_type==='residential'){addBed.run(room.id,'A');addBed.run(room.id,'B')}
+        }
+      }
+    }
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
 }
 
 function ensureColumn(db, table, column, definition) {
