@@ -29,6 +29,7 @@ const groups = {
   education: { label: 'คณะและสาขาวิชา', icon: GraduationCap, categories: ['faculty', 'major'] },
 }
 const tabs = [['catalog', 'ข้อมูลอ้างอิง'], ['space', 'อาคาร ห้อง และเตียง'], ['policy', 'นโยบายค่าเช่า'], ['education', 'คณะและสาขา']]
+const synchronizedSpaceCategories = new Set(['building', 'floor', 'room', 'bed'])
 
 function MasterData({ notify, user }) {
   const canManage = user?.permissions?.includes('master.manage')
@@ -73,6 +74,7 @@ function MasterData({ notify, user }) {
     try {
       if (editor.mode === 'cancel') {
         await api(`/master-data/${category}/${editor.item.id}`, { method: 'DELETE', body: { reason: payload.reason } })
+        if (synchronizedSpaceCategories.has(category)) await api('/master-data/sync-space', { method: 'POST', body: {} })
         setEditor(null); notify(`ยกเลิก${categoryConfig[category].label}แล้ว`); await load(); return
       }
       const details = {}
@@ -82,6 +84,7 @@ function MasterData({ notify, user }) {
       if (payload.term) details.term = payload.term
       const editing = editor.mode === 'edit'
       await api(editing ? `/master-data/${category}/${editor.item.id}` : `/master-data/${category}`, { method: editing ? 'PATCH' : 'POST', body: editing ? { name: payload.name.trim(), parentId: payload.parentId ? Number(payload.parentId) : null, details: Object.keys(details).length ? details : null } : { code: payload.code.trim().toUpperCase(), name: payload.name.trim(), parentId: payload.parentId ? Number(payload.parentId) : null, details: Object.keys(details).length ? details : null } })
+      if (synchronizedSpaceCategories.has(category)) await api('/master-data/sync-space', { method: 'POST', body: {} })
       setEditor(null)
       notify(`${editing ? 'แก้ไข' : 'เพิ่ม'}${categoryConfig[category].label}แล้ว`)
       await load()

@@ -398,11 +398,12 @@ function seed(db) {
       db.prepare(`INSERT OR IGNORE INTO beds(room_id,bed_no) VALUES (?,'B')`).run(roomRow.id)
     }
   }
-  seedPramoteBuildings(db)
   db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('ROOM','ค่าห้องพัก',0)`).run()
   db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('DEPOSIT','เงินประกัน',3000)`).run()
   db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('LATE_FEE','ค่าปรับชำระล่าช้า',0)`).run()
   seedMasterData(db)
+  seedPramoteBuildings(db)
+  syncSpaceMasterData(db)
   seedRatePolicies(db)
 }
 
@@ -423,31 +424,24 @@ function seedPramoteBuildings(db) {
       { floor:5,total:9,special:{ '2509':['electrical','ห้องไฟฟ้า'] } },
     ]},
   ]
-  const addBuilding=db.prepare(`INSERT OR IGNORE INTO buildings(code,name) VALUES (?,?)`)
-  const addFloor=db.prepare(`INSERT OR IGNORE INTO floors(building_id,floor_no) VALUES (?,?)`)
-  const addRoom=db.prepare(`INSERT OR IGNORE INTO rooms(floor_id,room_no,status,reason,readiness_status,room_type,room_name) VALUES (?,?,?,?,'not_ready',?,?)`)
-  const addResidentialRoom=db.prepare(`INSERT OR IGNORE INTO rooms(floor_id,room_no,status,readiness_status,room_type,room_name) VALUES (?,?,'vacant','ready','residential','ห้องพัก')`)
-  const addBed=db.prepare(`INSERT OR IGNORE INTO beds(room_id,bed_no) VALUES (?,?)`)
+  const upsert=db.prepare(`INSERT INTO master_data(category,code,name,parent_id,details_json) VALUES (?,?,?,?,?) ON CONFLICT(category,code) DO UPDATE SET name=excluded.name,parent_id=excluded.parent_id,details_json=excluded.details_json,active=1,cancellation_reason=NULL,updated_at=CURRENT_TIMESTAMP`)
   db.exec('BEGIN IMMEDIATE')
   try {
     for(const buildingPlan of plans){
-      addBuilding.run(buildingPlan.code,buildingPlan.name)
-      const building=db.prepare(`SELECT id FROM buildings WHERE code=?`).get(buildingPlan.code)
+      const building=db.prepare(`SELECT id FROM master_data WHERE category='building' AND code=?`).get(buildingPlan.code)
       for(const floorPlan of buildingPlan.floors){
-        addFloor.run(building.id,floorPlan.floor)
-        const floor=db.prepare(`SELECT id FROM floors WHERE building_id=? AND floor_no=?`).get(building.id,floorPlan.floor)
+        const floorCode=`${buildingPlan.code}-F${floorPlan.floor}`
+        upsert.run('floor',floorCode,`ชั้น ${floorPlan.floor}`,building.id,JSON.stringify({floorNo:floorPlan.floor}))
+        const floor=db.prepare(`SELECT id FROM master_data WHERE category='floor' AND code=?`).get(floorCode)
         let utilityIndex=0
         for(let sequence=1;sequence<=floorPlan.total;sequence++){
           const roomNo=`${buildingPlan.prefix}${floorPlan.floor}${String(sequence).padStart(2,'0')}`
           const special=floorPlan.special?.[roomNo]
           const residential=special?false:floorPlan.residential?sequence<=floorPlan.residential:true
-          if(residential)addResidentialRoom.run(floor.id,roomNo)
-          else{
-            const [type,name]=special||['utility',`ห้องใช้สอย ${++utilityIndex}`]
-            addRoom.run(floor.id,roomNo,'unavailable','พื้นที่ใช้สอย ไม่ใช่ห้องพัก',type,name)
-          }
-          const room=db.prepare(`SELECT id,room_type FROM rooms WHERE floor_id=? AND room_no=?`).get(floor.id,roomNo)
-          if(room.room_type==='residential'){addBed.run(room.id,'A');addBed.run(room.id,'B')}
+          const [roomType,roomName]=residential?['residential','ห้องพัก']:(special||['utility',`ห้องใช้สอย ${++utilityIndex}`])
+          upsert.run('room',roomNo,roomName,floor.id,JSON.stringify({roomType,bedCount:residential?2:0}))
+          const room=db.prepare(`SELECT id FROM master_data WHERE category='room' AND code=?`).get(roomNo)
+          if(residential)for(const bedNo of ['A','B'])upsert.run('bed',`${roomNo}-${bedNo}`,`เตียง ${bedNo}`,room.id,JSON.stringify({bedNo}))
         }
       }
     }
@@ -456,6 +450,35 @@ function seedPramoteBuildings(db) {
     db.exec('ROLLBACK')
     throw error
   }
+}
+
+export function syncSpaceMasterData(db) {
+  const parse=row=>row.details_json?JSON.parse(row.details_json):{}
+  const upsertBuilding=db.prepare(`INSERT INTO buildings(code,name) VALUES (?,?) ON CONFLICT(code) DO UPDATE SET name=excluded.name`)
+  const upsertFloor=db.prepare(`INSERT OR IGNORE INTO floors(building_id,floor_no) VALUES (?,?)`)
+  const upsertRoom=db.prepare(`INSERT INTO rooms(floor_id,room_no,status,reason,readiness_status,room_type,room_name) VALUES (?,?,?,?,?,?,?) ON CONFLICT(floor_id,room_no) DO UPDATE SET room_type=excluded.room_type,room_name=excluded.room_name,status=CASE WHEN excluded.room_type='residential' THEN rooms.status ELSE 'unavailable' END,readiness_status=CASE WHEN excluded.room_type='residential' THEN rooms.readiness_status ELSE 'not_ready' END,reason=CASE WHEN excluded.room_type='residential' THEN rooms.reason ELSE excluded.reason END`)
+  const addBed=db.prepare(`INSERT OR IGNORE INTO beds(room_id,bed_no) VALUES (?,?)`)
+  const buildings=db.prepare(`SELECT * FROM master_data WHERE category='building' AND active=1`).all()
+  for(const masterBuilding of buildings){
+    upsertBuilding.run(masterBuilding.code,masterBuilding.name)
+    const building=db.prepare(`SELECT id FROM buildings WHERE code=?`).get(masterBuilding.code)
+    const floors=db.prepare(`SELECT * FROM master_data WHERE category='floor' AND parent_id=? AND active=1`).all(masterBuilding.id)
+    for(const masterFloor of floors){
+      const floorNo=Number(parse(masterFloor).floorNo||masterFloor.name.match(/\d+/)?.[0])
+      if(!floorNo)continue
+      upsertFloor.run(building.id,floorNo)
+      const floor=db.prepare(`SELECT id FROM floors WHERE building_id=? AND floor_no=?`).get(building.id,floorNo)
+      const rooms=db.prepare(`SELECT * FROM master_data WHERE category='room' AND parent_id=? AND active=1`).all(masterFloor.id)
+      for(const masterRoom of rooms){
+        const details=parse(masterRoom),roomType=details.roomType||'residential',residential=roomType==='residential'
+        upsertRoom.run(floor.id,masterRoom.code,residential?'vacant':'unavailable',residential?null:'พื้นที่ใช้สอย ไม่ใช่ห้องพัก',residential?'ready':'not_ready',roomType,masterRoom.name)
+        const room=db.prepare(`SELECT id FROM rooms WHERE floor_id=? AND room_no=?`).get(floor.id,masterRoom.code)
+        const masterBeds=db.prepare(`SELECT * FROM master_data WHERE category='bed' AND parent_id=? AND active=1`).all(masterRoom.id)
+        for(const masterBed of masterBeds)addBed.run(room.id,parse(masterBed).bedNo||masterBed.name.replace('เตียง ','')||masterBed.code)
+      }
+    }
+  }
+  return {buildings:buildings.length,rooms:db.prepare(`SELECT COUNT(*) count FROM rooms`).get().count,beds:db.prepare(`SELECT COUNT(*) count FROM beds`).get().count}
 }
 
 function ensureColumn(db, table, column, definition) {

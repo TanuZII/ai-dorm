@@ -3,7 +3,7 @@ import cors from 'cors'
 import helmet from 'helmet'
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
-import { createDb, cleanupAuditLogs } from './db.js'
+import { createDb, cleanupAuditLogs, syncSpaceMasterData } from './db.js'
 import { authRequired, issueToken, loadUser, requirePermission, verifyCredentials } from './auth.js'
 import { writeAudit } from './audit.js'
 import { ldapConfigured } from './ldap.js'
@@ -250,6 +250,10 @@ export function createApp(options = {}) {
     if (req.query.from) { filters.push('created_at>=?'); params.push(req.query.from) }
     if (req.query.to) { filters.push('created_at<=?'); params.push(req.query.to) }
     res.json(db.prepare(`SELECT * FROM audit_logs ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`).all(...params, limit))
+  })
+
+  app.post('/api/master-data/sync-space', requirePermission('master.manage'), (req,res,next)=>{
+    try{const result=syncSpaceMasterData(db);writeAudit(db,req,{action:'SYNC',entityType:'master.space',after:result});res.json(result)}catch(error){next(error)}
   })
 
   app.get('/api/master-data/:category', requirePermission('master.read'), (req,res,next)=>{
