@@ -1,10 +1,8 @@
 const tabs = [
-  ['overview', 'ภาพรวม'],
   ['invoices', 'ใบแจ้งหนี้'],
-  ['payments', 'รับชำระ'],
-  ['bank', 'ธนาคาร'],
-  ['rates', 'อัตราและค่าธรรมเนียม'],
-  ['reports', 'รายงาน'],
+  ['proofs', 'หลักฐานชำระ'],
+  ['receipts', 'ใบเสร็จรับเงิน'],
+  ['remittances', 'นำส่งเงินรายวัน'],
 ]
 
 function FinanceTabs({ active, onChange }) {

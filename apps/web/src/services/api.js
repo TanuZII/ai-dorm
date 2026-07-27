@@ -41,3 +41,22 @@ export async function login(username, password) {
   session.setToken(result.token)
   return result.user
 }
+
+export async function downloadApiFile(path, fallbackName) {
+  const response = await fetch(`/api${path}`, { headers: session.getToken() ? { authorization: `Bearer ${session.getToken()}` } : {} })
+  if (!response.ok) return parseApiResponse(response, path)
+  const blob = await response.blob()
+  const disposition = response.headers.get('content-disposition') || ''
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] || fallbackName
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+export async function openApiFile(path) {
+  const response = await fetch(`/api${path}`, { headers: session.getToken() ? { authorization: `Bearer ${session.getToken()}` } : {} })
+  if (!response.ok) return parseApiResponse(response, path)
+  const url = URL.createObjectURL(await response.blob())
+  window.open(url, '_blank', 'noopener,noreferrer')
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}

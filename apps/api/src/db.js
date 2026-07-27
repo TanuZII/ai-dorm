@@ -14,7 +14,8 @@ export const permissions = [
   ['contracts.read', 'ดูสัญญาของตนเอง'], ['contracts.sign', 'ยืนยันและลงนามสัญญาของตนเอง'],
   ['rooms.read', 'ดูอาคาร ห้อง และเตียง'], ['rooms.manage', 'จัดการสถานะห้องและเตียง'],
   ['finance.read', 'ดูข้อมูลการเงิน'], ['finance.manage', 'ตั้งหนี้และรับชำระเงิน'],
-  ['finance.cancel', 'ยกเลิกใบแจ้งหนี้และใบเสร็จ'], ['reports.read', 'ดูและส่งออกรายงาน'],
+  ['finance.cancel', 'ยกเลิกใบแจ้งหนี้ ใบเสร็จ และรายการนำส่ง'],
+  ['finance.approve', 'ตรวจหลักฐานและอนุมัติการนำส่งเงิน'], ['reports.read', 'ดูและส่งออกรายงาน'],
   ['repairs.read', 'ดูงานซ่อม'], ['repairs.manage', 'จัดการงานซ่อม'],
   ['repairs.create', 'แจ้งซ่อมผ่านระบบ'],
   ['inventory.read', 'ดูสต็อก'], ['inventory.manage', 'จัดการสต็อก'],
@@ -226,6 +227,25 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
       success_count INTEGER NOT NULL, error_count INTEGER NOT NULL, imported_by INTEGER NOT NULL,
       imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS payment_proofs (
+      id INTEGER PRIMARY KEY, invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id), amount REAL NOT NULL CHECK(amount > 0),
+      reference_no TEXT, paid_at TEXT NOT NULL, filename TEXT NOT NULL, mime_type TEXT NOT NULL,
+      file_base64 TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','approved','rejected','cancelled')),
+      review_note TEXT, reviewed_by INTEGER, reviewed_at TEXT, payment_id INTEGER REFERENCES payments(id),
+      submitted_by INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS remittances (
+      id INTEGER PRIMARY KEY, remittance_no TEXT NOT NULL UNIQUE, remittance_date TEXT NOT NULL,
+      revenue_amount REAL NOT NULL DEFAULT 0, deposit_amount REAL NOT NULL DEFAULT 0,
+      cash_amount REAL NOT NULL DEFAULT 0, transfer_amount REAL NOT NULL DEFAULT 0,
+      revenue_transfer_reference TEXT, deposit_transfer_reference TEXT, university_receipt_no TEXT,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','cancelled')),
+      submitted_by INTEGER, submitted_at TEXT, approved_by INTEGER, approved_at TEXT,
+      cancelled_reason TEXT, cancelled_by INTEGER, cancelled_at TEXT,
+      created_by INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
 
     CREATE TABLE IF NOT EXISTS repairs (
       id INTEGER PRIMARY KEY, room_id INTEGER REFERENCES rooms(id), title TEXT NOT NULL, detail TEXT,
@@ -294,6 +314,7 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
   ensureColumn(db, 'leases', 'document_sha256', 'TEXT')
   ensureColumn(db, 'leases', 'renewal_requested_at', 'TEXT')
   ensureColumn(db, 'leases', 'tenant_confirmed_at', 'TEXT')
+  ensureColumn(db, 'invoices', 'email_sent_at', 'TEXT')
   seed(db)
   return db
 }
@@ -306,7 +327,7 @@ function seed(db) {
   const adminRole = db.prepare(`SELECT id FROM roles WHERE name='ผู้ดูแลระบบ'`).get()
   db.prepare(`INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT ?,id FROM permissions`).run(adminRole.id)
   const tenantRole = db.prepare(`SELECT id FROM roles WHERE name='ผู้เช่า' AND deleted_at IS NULL`).get()
-  if (tenantRole) db.prepare(`INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT ?,id FROM permissions WHERE code IN ('repairs.read','repairs.create','contracts.read','contracts.sign')`).run(tenantRole.id)
+  if (tenantRole) db.prepare(`INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT ?,id FROM permissions WHERE code IN ('repairs.read','repairs.create','contracts.read','contracts.sign','finance.read')`).run(tenantRole.id)
 
   const adminExists = db.prepare(`SELECT id FROM users WHERE username='admin'`).get()
   if (!adminExists) {

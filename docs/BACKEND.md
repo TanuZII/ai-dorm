@@ -20,7 +20,8 @@ API เริ่มต้นที่ `http://localhost:3000` และเก็
 - ผู้เช่า 3 ประเภท พร้อมบัญชี Portal และ reset password
 - อาคาร ชั้น ห้อง เตียง และสถานะว่าง/มีผู้พัก/ไม่พร้อม/ชำรุด
 - Rate plan รายวัน รายเดือน รายเทอม รายปี, ค่าสาธารณูปโภค และค่าธรรมเนียม
-- ใบแจ้งหนี้ รับชำระ ใบเสร็จ และการยกเลิกแบบบังคับระบุเหตุผล
+- ใบแจ้งหนี้ PDF/e-mail, หลักฐานการชำระ, ตรวจหลักฐาน, ใบเสร็จ PDF และการยกเลิกแบบบังคับระบุเหตุผล
+- สรุปและอนุมัติการนำส่งรายวัน แยกรายได้มหาวิทยาลัยกับเงินประกัน
 - นำเข้าการชำระจาก CSV ธนาคาร
 - งานแจ้งซ่อมและสถานะงาน
 - สต็อกอุปกรณ์หอพัก ช่าง และทำความสะอาด พร้อมรายการเคลื่อนไหว
@@ -38,7 +39,15 @@ API เริ่มต้นที่ `http://localhost:3000` และเก็
 | GET/POST/PATCH | `/api/tenants` | นักศึกษา บุคลากร บุคคลภายนอก |
 | GET/PATCH | `/api/rooms` | ห้องและสถานะห้อง |
 | POST | `/api/invoices` | ตั้งหนี้และออกใบแจ้งหนี้ |
+| POST/GET | `/api/invoices/:id/send`, `/api/invoices/:id/document` | ส่ง e-mail และดาวน์โหลด PDF |
 | POST | `/api/payments` | รับชำระและออกใบเสร็จ |
+| GET | `/api/receipts/:id/document` | ดาวน์โหลดใบเสร็จ PDF |
+| GET/POST | `/api/payment-proofs` | ดูและแนบหลักฐานการชำระ |
+| POST | `/api/payment-proofs/:id/review` | ตรวจหลักฐานและออกใบเสร็จ |
+| GET/POST | `/api/remittances` | ดูและสร้างสรุปนำส่งประจำวัน |
+| POST | `/api/remittances/:id/submit` | ส่งรายการให้ผู้บริหารอนุมัติ |
+| POST | `/api/remittances/:id/approve` | อนุมัติพร้อมเลขโอนและเลขใบเสร็จมหาวิทยาลัย |
+| POST | `/api/remittances/:id/cancel` | ยกเลิกรายการนำส่งพร้อมเหตุผล |
 | POST | `/api/invoices/:id/cancel` | ยกเลิกใบแจ้งหนี้พร้อมเหตุผล |
 | POST | `/api/receipts/:id/cancel` | ยกเลิกใบเสร็จพร้อมเหตุผล |
 | POST | `/api/bank-imports` | นำเข้า CSV จากธนาคาร |
@@ -47,6 +56,8 @@ API เริ่มต้นที่ `http://localhost:3000` และเก็
 | GET/POST | `/api/inventory` | สต็อกและการเบิกจ่าย |
 
 ทุก endpoint ยกเว้น health และ login ใช้ `Authorization: Bearer <token>` และตรวจ permission ของผู้ใช้
+
+ข้อมูลบัญชีการเงินจริงต้องกำหนดใน `.env` ผ่าน `HOLDING_ACCOUNT_*`, `UNIVERSITY_ACCOUNT_*` และ `DEPOSIT_ACCOUNT_*` ระบบไม่เก็บเลขบัญชีจริงไว้ใน source code และส่งเลขบัญชีแบบปกปิดให้หน้าเว็บ
 
 ## รูปแบบไฟล์ธนาคาร
 

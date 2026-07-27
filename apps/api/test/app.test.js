@@ -27,6 +27,7 @@ test('critical dormitory backend flows', async (t) => {
     assert.equal(response.status, 200)
     assert.ok(body.token)
     assert.ok(body.user.permissions.includes('finance.cancel'))
+    assert.ok(body.user.permissions.includes('finance.approve'))
     token = body.token
   })
 
@@ -96,6 +97,59 @@ test('critical dormitory backend flows', async (t) => {
     assert.equal(logs.response.status, 200)
     assert.ok(logs.body.some(log => log.action === 'CREATE'))
     assert.ok(logs.body.some(log => log.action === 'CANCEL'))
+  })
+
+  await t.test('invoice delivery, payment proof, receipt document and daily remittance workflow', async () => {
+    const invoice = await api('/invoices', { method: 'POST', body: { tenantId, dueDate: '2026-08-25', items: [
+      { itemType: 'room', description: 'ค่าห้องพัก สิงหาคม 2569', quantity: 1, unitPrice: 3000 },
+      { itemType: 'deposit', description: 'เงินประกันห้องพัก', quantity: 1, unitPrice: 2000 },
+    ] } })
+    assert.equal(invoice.response.status, 201)
+    const sent = await api(`/invoices/${invoice.body.id}/send`, { method: 'POST', body: {} })
+    assert.equal(sent.response.status, 200)
+    assert.equal(sent.body.status, 'queued')
+    const invoicePdf = await fetch(`${base}/invoices/${invoice.body.id}/document`, { headers: { authorization: `Bearer ${token}` } })
+    assert.equal(invoicePdf.headers.get('content-type'), 'application/pdf')
+    assert.equal(Buffer.from(await invoicePdf.arrayBuffer()).subarray(0, 4).toString(), '%PDF')
+
+    const tenantLogin = await api('/auth/login', { method: 'POST', body: { username: 'st690001', password: 'Student@123' } })
+    token = tenantLogin.body.token
+    const ownInvoices = await api('/invoices')
+    assert.ok(ownInvoices.body.every(item => item.tenant_id === tenantId))
+    const proof = await api('/payment-proofs', { method: 'POST', body: {
+      invoiceId: invoice.body.id, amount: 3000, referenceNo: 'KPLUS-001', paidAt: '2026-08-20T09:15:00.000Z',
+      filename: 'transfer.pdf', mimeType: 'application/pdf', fileBase64: Buffer.from('payment proof document').toString('base64'),
+    } })
+    assert.equal(proof.response.status, 201)
+    assert.equal(proof.body.status, 'pending')
+
+    const adminLogin = await api('/auth/login', { method: 'POST', body: { username: 'admin', password: 'Admin@1234' } })
+    token = adminLogin.body.token
+    const reviewed = await api(`/payment-proofs/${proof.body.id}/review`, { method: 'POST', body: { decision: 'approved', note: 'ตรวจสอบยอดและบัญชีผู้โอนถูกต้อง' } })
+    assert.equal(reviewed.response.status, 200)
+    assert.match(reviewed.body.receipt.receipt_no, /^RC-/)
+    const receiptPdf = await fetch(`${base}/receipts/${reviewed.body.receipt.id}/document`, { headers: { authorization: `Bearer ${token}` } })
+    assert.equal(receiptPdf.headers.get('content-type'), 'application/pdf')
+    assert.equal(Buffer.from(await receiptPdf.arrayBuffer()).subarray(0, 4).toString(), '%PDF')
+
+    const cash = await api('/payments', { method: 'POST', body: { invoiceId: invoice.body.id, amount: 2000, method: 'cash', paidAt: '2026-08-20T10:00:00.000Z' } })
+    assert.equal(cash.response.status, 201)
+    const remittance = await api('/remittances', { method: 'POST', body: { date: '2026-08-20' } })
+    assert.equal(remittance.response.status, 201)
+    assert.equal(remittance.body.revenue_amount, 3000)
+    assert.equal(remittance.body.deposit_amount, 2000)
+    assert.equal(remittance.body.cash_amount, 2000)
+    assert.equal(remittance.body.transfer_amount, 3000)
+    const submitted = await api(`/remittances/${remittance.body.id}/submit`, { method: 'POST', body: {} })
+    assert.equal(submitted.body.status, 'submitted')
+    const missingTransfer = await api(`/remittances/${remittance.body.id}/approve`, { method: 'POST', body: { universityReceiptNo: 'SDU-001' } })
+    assert.equal(missingTransfer.response.status, 400)
+    const approved = await api(`/remittances/${remittance.body.id}/approve`, { method: 'POST', body: { revenueTransferReference: 'REV-001', depositTransferReference: 'DEP-001', universityReceiptNo: 'SDU-001' } })
+    assert.equal(approved.body.status, 'approved')
+    const noReason = await api(`/remittances/${remittance.body.id}/cancel`, { method: 'POST', body: { reason: '' } })
+    assert.equal(noReason.response.status, 400)
+    const cancelled = await api(`/remittances/${remittance.body.id}/cancel`, { method: 'POST', body: { reason: 'ยกเลิกเพื่อแก้ไขเลขที่ใบเสร็จมหาวิทยาลัย' } })
+    assert.equal(cancelled.body.status, 'cancelled')
   })
 
   await t.test('room status requires a reason when damaged', async () => {
