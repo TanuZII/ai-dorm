@@ -343,16 +343,18 @@ export function createApp(options = {}) {
 }
 
 function registerRoomRoutes(app, db) {
+  const activeBedCount=`(SELECT COUNT(*) FROM beds bx JOIN master_data mdx ON mdx.category='bed' AND mdx.parent_id=mr.id AND mdx.active=1 AND COALESCE(json_extract(mdx.details_json,'$.bedNo'),REPLACE(mdx.name,'เตียง ',''),mdx.code)=bx.bed_no WHERE bx.room_id=r.id)`
+  const vacantBedCount=`(SELECT COUNT(*) FROM beds bx JOIN master_data mdx ON mdx.category='bed' AND mdx.parent_id=mr.id AND mdx.active=1 AND COALESCE(json_extract(mdx.details_json,'$.bedNo'),REPLACE(mdx.name,'เตียง ',''),mdx.code)=bx.bed_no WHERE bx.room_id=r.id AND bx.status='vacant')`
   app.get('/api/rooms', requirePermission('rooms.read'), (req,res,next)=>{try{
     const q=validate(z.object({buildingId:idSchema.optional(),floor:z.coerce.number().int().positive().optional(),bedCount:z.coerce.number().int().positive().optional(),availability:z.enum(['all','available','vacant']).default('all')}),req.query)
     const where=[],params=[]
     if(q.buildingId){where.push('b.id=?');params.push(q.buildingId)}
     if(q.floor){where.push('f.floor_no=?');params.push(q.floor)}
-    if(q.bedCount){where.push('(SELECT COUNT(*) FROM beds bx WHERE bx.room_id=r.id)=?');params.push(q.bedCount)}
+    if(q.bedCount){where.push(`${activeBedCount}=?`);params.push(q.bedCount)}
     if(q.availability==='available')where.push("r.readiness_status='ready' AND r.status NOT IN ('unavailable','damaged') AND EXISTS(SELECT 1 FROM beds bx WHERE bx.room_id=r.id AND bx.status='vacant')")
     if(q.availability==='vacant')where.push("r.readiness_status='ready' AND r.status='vacant' AND NOT EXISTS(SELECT 1 FROM beds bx WHERE bx.room_id=r.id AND bx.status!='vacant')")
     const clause=where.length?`WHERE ${where.join(' AND ')}`:''
-    res.json(db.prepare(`SELECT r.*,f.floor_no,b.id building_id,b.code building_code,b.name building_name,(SELECT COUNT(*) FROM beds WHERE room_id=r.id) bed_count,(SELECT COUNT(*) FROM beds WHERE room_id=r.id AND status='vacant') vacant_beds FROM rooms r JOIN floors f ON f.id=r.floor_id JOIN buildings b ON b.id=f.building_id ${clause} ORDER BY b.code,f.floor_no,r.room_no`).all(...params))
+    res.json(db.prepare(`SELECT r.*,mr.name room_name,f.floor_no,b.id building_id,mb.code building_code,mb.name building_name,${activeBedCount} bed_count,${vacantBedCount} vacant_beds FROM rooms r JOIN floors f ON f.id=r.floor_id JOIN buildings b ON b.id=f.building_id JOIN master_data mb ON mb.category='building' AND mb.code=b.code AND mb.active=1 JOIN master_data mf ON mf.category='floor' AND mf.parent_id=mb.id AND mf.active=1 AND CAST(json_extract(mf.details_json,'$.floorNo') AS INTEGER)=f.floor_no JOIN master_data mr ON mr.category='room' AND mr.parent_id=mf.id AND mr.code=r.room_no AND mr.active=1 ${clause} ORDER BY mb.code,f.floor_no,r.room_no`).all(...params))
   }catch(error){next(error)}})
 
   app.get('/api/beds', requirePermission('rooms.read'), (req,res,next)=>{try{
@@ -360,10 +362,10 @@ function registerRoomRoutes(app, db) {
     const where=[],params=[]
     if(q.buildingId){where.push('bu.id=?');params.push(q.buildingId)}
     if(q.floor){where.push('f.floor_no=?');params.push(q.floor)}
-    if(q.bedCount){where.push('(SELECT COUNT(*) FROM beds bx WHERE bx.room_id=r.id)=?');params.push(q.bedCount)}
+    if(q.bedCount){where.push(`${activeBedCount}=?`);params.push(q.bedCount)}
     if(q.availability==='available')where.push("bd.status='vacant' AND r.readiness_status='ready' AND r.status NOT IN ('unavailable','damaged')")
     const clause=where.length?`WHERE ${where.join(' AND ')}`:''
-    res.json(db.prepare(`SELECT bd.*,r.room_no,r.readiness_status,f.floor_no,bu.id building_id,bu.code building_code,bu.name building_name,(SELECT COUNT(*) FROM beds bx WHERE bx.room_id=r.id) room_bed_count FROM beds bd JOIN rooms r ON r.id=bd.room_id JOIN floors f ON f.id=r.floor_id JOIN buildings bu ON bu.id=f.building_id ${clause} ORDER BY bu.code,f.floor_no,r.room_no,bd.bed_no`).all(...params))
+    res.json(db.prepare(`SELECT bd.*,r.room_no,r.readiness_status,f.floor_no,bu.id building_id,mb.code building_code,mb.name building_name,${activeBedCount} room_bed_count FROM beds bd JOIN rooms r ON r.id=bd.room_id JOIN floors f ON f.id=r.floor_id JOIN buildings bu ON bu.id=f.building_id JOIN master_data mb ON mb.category='building' AND mb.code=bu.code AND mb.active=1 JOIN master_data mf ON mf.category='floor' AND mf.parent_id=mb.id AND mf.active=1 AND CAST(json_extract(mf.details_json,'$.floorNo') AS INTEGER)=f.floor_no JOIN master_data mr ON mr.category='room' AND mr.parent_id=mf.id AND mr.code=r.room_no AND mr.active=1 JOIN master_data md ON md.category='bed' AND md.parent_id=mr.id AND md.active=1 AND COALESCE(json_extract(md.details_json,'$.bedNo'),REPLACE(md.name,'เตียง ',''),md.code)=bd.bed_no ${clause} ORDER BY mb.code,f.floor_no,r.room_no,bd.bed_no`).all(...params))
   }catch(error){next(error)}})
 
   app.patch('/api/rooms/:id/status', requirePermission('rooms.manage'), (req,res,next)=>{try{const id=numberId(req),before=getById(db,'rooms',id);if(!before)throw httpError(404,'NOT_FOUND','ไม่พบห้อง');const b=validate(z.object({status:z.enum(['vacant','occupied','unavailable','damaged']),reason:z.string().min(1).max(500).nullable().optional()}),req.body);if(['unavailable','damaged'].includes(b.status)&&!b.reason)throw httpError(400,'REASON_REQUIRED','ต้องระบุเหตุผลเมื่อห้องไม่พร้อมหรือชำรุด');db.prepare(`UPDATE rooms SET status=?,reason=?,readiness_status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(b.status,b.reason||null,['unavailable','damaged'].includes(b.status)?'not_ready':before.readiness_status,id);const after=getById(db,'rooms',id);writeAudit(db,req,{action:'STATUS_CHANGE',entityType:'room',entityId:id,before,after});res.json(after)}catch(error){next(error)}})
