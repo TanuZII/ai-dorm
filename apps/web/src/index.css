@@ -17,6 +17,7 @@ button { cursor: pointer; }
 
 /* Keep every dialog backdrop opaque across the full viewport, including the sidebar and header. */
 .fixed.inset-0.z-50 {
+  margin: 0 !important;
   background-color: rgb(11 31 51 / 82%) !important;
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);

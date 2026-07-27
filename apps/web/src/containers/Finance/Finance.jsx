@@ -5,6 +5,7 @@ import {
   ShieldCheck, Upload, X, XCircle,
 } from 'lucide-react'
 import FinanceTabs from '../../components/FinanceTabs/FinanceTabs'
+import FinanceSettings from './FinanceSettings'
 import { api, downloadApiFile, fileToBase64, openApiFile } from '../../services/api'
 
 const fieldClass = 'h-10 w-full rounded-xl border border-[#d7e1e7] bg-white px-3 text-xs outline-none transition focus:border-[#4c8fc8] focus:ring-2 focus:ring-[#4c8fc8]/15'
@@ -48,12 +49,13 @@ function Finance({ notify, user }) {
 
     <section aria-label="ขั้นตอนปิดยอดรายวัน" className="grid overflow-hidden rounded-2xl border border-[#dce6eb] bg-white md:grid-cols-4">{workflow.map(([label,value,Icon,note,unit],index)=><button key={label} onClick={()=>setTab(['invoices','proofs','receipts','remittances'][index])} disabled={tenantPortal&&index===3} className="group relative flex items-center gap-3 border-b border-[#e6ecef] p-4 text-left last:border-0 disabled:cursor-default disabled:opacity-40 md:border-b-0 md:border-r"><span className="grid size-10 place-items-center rounded-xl bg-[#edf5fb] text-[#397caf]"><Icon size={18}/></span><span><b className="block text-xs text-[#2b455c]">{label}</b><span className="mt-1 block text-[10px] text-[#7d8e9b]">{note} · {value} {unit}</span></span>{index<3&&<span className="absolute -right-2 top-1/2 z-10 hidden size-4 -translate-y-1/2 rotate-45 border-r border-t border-[#dce6eb] bg-white md:block"/>}</button>)}</section>
 
-    <section className="overflow-hidden rounded-2xl border border-[#dfe7eb] bg-white shadow-[0_2px_12px_rgba(22,45,68,.04)]"><FinanceTabs active={tab} onChange={setTab}/><div className="p-5">
+    <section className="overflow-hidden rounded-2xl border border-[#dfe7eb] bg-white shadow-[0_2px_12px_rgba(22,45,68,.04)]"><FinanceTabs active={tab} onChange={setTab} tenantPortal={tenantPortal}/><div className="p-5">
       {loading?<Loading/>:<>
         {tab==='invoices'&&<Invoices rows={filtered} query={query} setQuery={setQuery} canManage={canManage} canCancel={canCancel} tenantPortal={tenantPortal} onProof={item=>setModal({type:'proof',item})} onPayment={item=>setModal({type:'payment',item})} onCancel={item=>cancelDocument('invoice',item)} onSend={item=>run(()=>api(`/invoices/${item.id}/send`,{method:'POST',body:{}}),'ส่งใบแจ้งหนี้ผ่านระบบ/email แล้ว')}/>}
         {tab==='proofs'&&<Proofs rows={data.proofs} canApprove={canApprove} onView={item=>openApiFile(`/payment-proofs/${item.id}/file`)} onReview={(item,decision)=>setModal({type:'review',item,decision})}/>}
         {tab==='receipts'&&<Receipts rows={data.receipts} canCancel={canCancel} onCancel={item=>cancelDocument('receipt',item)}/>}
         {tab==='remittances'&&!tenantPortal&&<Remittances rows={data.remittances} accounts={data.accounts} canManage={canManage} canApprove={canApprove} canCancel={canCancel} onCreate={()=>setModal({type:'remittance'})} onSubmit={item=>run(()=>api(`/remittances/${item.id}/submit`,{method:'POST',body:{}}),'ส่งรายการให้ผู้บริหารอนุมัติแล้ว')} onApprove={item=>setModal({type:'approve-remittance',item})} onCancel={item=>cancelDocument('remittance',item)}/>}
+        {tab==='settings'&&!tenantPortal&&<FinanceSettings notify={notify} canManage={canManage}/>}
       </>}
     </div></section>
     {modal&&<FinanceDialog modal={modal} invoices={outstanding} tenants={data.tenants} close={()=>setModal(null)} submit={(payload)=>handleSubmit(modal,payload,run)}/>}

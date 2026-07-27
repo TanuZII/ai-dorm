@@ -4,13 +4,13 @@
 
 | Requirement | สถานะ | Implementation |
 | --- | --- | --- |
-| 3.11.1 อัตราห้องรายวัน/เดือน/เทอม/ปี | Implemented | `rate_plans` และหน้าอัตรา |
-| 3.11.2 อัตราสาธารณูปโภค | Implemented | `utility_rates` รองรับน้ำและไฟ |
-| 3.11.3 ค่าธรรมเนียมอื่น | Implemented | `fee_types` |
+| 3.11.1 อัตราห้องรายวัน/เดือน/เทอม/ปี | Implemented | เมนูการเงิน > กำหนดอัตรา บันทึก `rate_plans` พร้อมประเภทผู้เช่าและช่วงวันที่มีผล |
+| 3.11.2 อัตราสาธารณูปโภค | Implemented | เมนูการเงิน > กำหนดอัตรา รองรับน้ำ/ไฟ อัตราต่อหน่วย ขั้นต่ำ และช่วงวันที่มีผล |
+| 3.11.3 ค่าธรรมเนียมอื่น | Implemented | เมนูการเงิน > กำหนดอัตรา บันทึกรหัส ชื่อ และค่าเริ่มต้นใน `fee_types` |
 | 3.11.4 ตั้งหนี้รายบุคคล | Implemented | Invoice และ invoice items ผูก tenant |
 | 3.11.5 รับชำระและออกใบเสร็จ | Implemented | Payment สร้าง receipt ใน transaction เดียวกัน |
 | 3.11.6–7 ยกเลิกใบแจ้งหนี้/ใบเสร็จพร้อมเหตุผล | Implemented | บังคับ reason และ Audit Log |
-| 3.11.8–12 รายงานการรับเงินและลูกหนี้ | Implemented | Daily receipts, summary, remittance, receipt register และ debtor APIs |
+| 3.11.8–12 รายงานการรับเงินและลูกหนี้ | Implemented | ศูนย์รายงานมีกลุ่ม “การเงิน 3.11” ครบ 5 รายงาน: ตามผู้ออกใบเสร็จ, สรุปรายวัน, ใบนำส่งรายวัน, ทะเบียนเลขใบเสร็จ และสถานะชำระของนักศึกษา/บุคลากร พร้อม Export Excel |
 | 3.12.1 รับชำระใบแจ้งหนี้ผ่านธนาคาร | Integration pending | Data model และ bank-file flow พร้อม รอ bank specification |
 | 3.12.2 ชำระด้วยเลขที่บัญชีออนไลน์ | Integration pending | รองรับ payment method แล้ว รอ provider/callback specification |
 | 3.12.3 นำเข้าไฟล์ธนาคาร | Implemented | CSV import พร้อมผลสำเร็จ/ผิดพลาดรายบรรทัด |
