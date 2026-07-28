@@ -108,6 +108,13 @@ export function createApp(options = {}) {
   const db = options.db || createDb()
   const app = express()
   app.locals.db = db
+  app.locals.integrations = options.integrations || {}
+  app.locals.integrationConfig = options.integrationConfig || {
+    simulationEnabled: false,
+    mode: 'real',
+    callbackSecret: null,
+    directoryPassword: null,
+  }
   app.set('trust proxy', 1)
   app.use(helmet())
   app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') || true, credentials: false }))
