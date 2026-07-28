@@ -20,6 +20,12 @@ test('critical dormitory backend flows', async (t) => {
     const body = response.status === 204 ? null : await response.json()
     return { response, body }
   }
+  let configuredFeeSequence=0
+  async function issueConfiguredInvoice(tenantId,dueDate,items){
+    const configured=[]
+    for(const item of items){const fee=await api('/fee-types',{method:'POST',body:{code:`TEST_FEE_${++configuredFeeSequence}`,name:item.description,defaultAmount:item.unitPrice,itemType:item.itemType}});assert.equal(fee.response.status,201);configured.push({feeTypeId:fee.body.id,description:item.description,quantity:item.quantity||1})}
+    return api('/invoices',{method:'POST',body:{tenantId,dueDate,items:configured}})
+  }
 
   t.after(() => { server.close(); db.close() })
 
@@ -140,6 +146,7 @@ test('critical dormitory backend flows', async (t) => {
   })
 
   let tenantId
+  let checkerToken
   await t.test('create tenant and portal account with password policy', async () => {
     const directory = await api('/integrations/students/690001')
     assert.equal(directory.response.status, 200)
@@ -156,15 +163,23 @@ test('critical dormitory backend flows', async (t) => {
     const valid = await api(`/tenants/${tenantId}/portal-account`, { method: 'POST', body: { username: 'st690001', password: 'Student@123' } })
     assert.equal(valid.response.status, 201)
     assert.equal(valid.body.tenant_id, tenantId)
+    db.prepare(`INSERT INTO leases(contract_no,tenant_id,contract_type,starts_at,ends_at,deposit_amount,status,contract_date,rental_period,advance_rent,minimum_term_months,document_status,signed_at,rate_policy_code,rate_snapshot_json) VALUES (?,?,?,'2026-01-01','2026-09-30',0,'expired','2025-12-20','term',0,1,'signed','2025-12-20T09:00:00.000Z','ST68_TERM',?)`).run('CT-HIST-690001',tenantId,'STUDENT_TERM',JSON.stringify({lateFee:100,delinquencyMonths:2,terminationAction:'ยุติการเช่าห้องพัก'}))
+    const permissions = await api('/permissions')
+    const checkerPermissions = permissions.body.filter(item => ['finance.read','finance.approve'].includes(item.code)).map(item => item.id)
+    const checkerRole = await api('/roles', { method:'POST', body:{name:'ผู้อนุมัติการเงินทดสอบ',permissionIds:checkerPermissions} })
+    const checker = await api('/users', { method:'POST', body:{username:'finance.checker',displayName:'ผู้ตรวจสอบการเงิน',authSource:'local',password:'Checker@1234',roleIds:[checkerRole.body.id]} })
+    assert.equal(checker.response.status,201)
+    const checkerLogin = await api('/auth/login', { method:'POST', body:{username:'finance.checker',password:'Checker@1234'} })
+    checkerToken=checkerLogin.body.token
   })
 
   let invoiceId
   let receiptId
   await t.test('issue invoice, receive payment and issue receipt', async () => {
-    const invoice = await api('/invoices', { method: 'POST', body: { tenantId, dueDate: '2026-08-15', items: [
+    const invoice = await issueConfiguredInvoice(tenantId,'2026-08-15',[
       { itemType: 'room', description: 'ค่าห้องพัก ภาคเรียน 1/2569', quantity: 1, unitPrice: 8500 },
       { itemType: 'deposit', description: 'เงินประกันห้องพัก', quantity: 1, unitPrice: 3000 },
-    ] } })
+    ])
     assert.equal(invoice.response.status, 201)
     assert.equal(invoice.body.total, 11500)
     invoiceId = invoice.body.id
@@ -194,10 +209,10 @@ test('critical dormitory backend flows', async (t) => {
   })
 
   await t.test('invoice delivery, payment proof, receipt document and daily remittance workflow', async () => {
-    const invoice = await api('/invoices', { method: 'POST', body: { tenantId, dueDate: '2026-08-25', items: [
+    const invoice = await issueConfiguredInvoice(tenantId,'2026-08-25',[
       { itemType: 'room', description: 'ค่าห้องพัก สิงหาคม 2569', quantity: 1, unitPrice: 3000 },
       { itemType: 'deposit', description: 'เงินประกันห้องพัก', quantity: 1, unitPrice: 2000 },
-    ] } })
+    ])
     assert.equal(invoice.response.status, 201)
     const sent = await api(`/invoices/${invoice.body.id}/send`, { method: 'POST', body: {} })
     assert.equal(sent.response.status, 200)
@@ -228,7 +243,10 @@ test('critical dormitory backend flows', async (t) => {
 
     const cash = await api('/payments', { method: 'POST', body: { invoiceId: invoice.body.id, amount: 2000, method: 'cash', paidAt: '2026-08-20T10:00:00.000Z' } })
     assert.equal(cash.response.status, 201)
-    const remittance = await api('/remittances', { method: 'POST', body: { date: '2026-08-20' } })
+    const mismatch = await api('/remittances', { method: 'POST', body: { date: '2026-08-20', holdingStatementAmount:4999, cashDepositReference:'CASH-DEP-001' } })
+    assert.equal(mismatch.response.status,409)
+    assert.equal(mismatch.body.error,'RECONCILIATION_MISMATCH')
+    const remittance = await api('/remittances', { method: 'POST', body: { date: '2026-08-20', holdingStatementAmount:5000, cashDepositReference:'CASH-DEP-001' } })
     assert.equal(remittance.response.status, 201)
     assert.equal(remittance.body.revenue_amount, 3000)
     assert.equal(remittance.body.deposit_amount, 2000)
@@ -236,14 +254,50 @@ test('critical dormitory backend flows', async (t) => {
     assert.equal(remittance.body.transfer_amount, 3000)
     const submitted = await api(`/remittances/${remittance.body.id}/submit`, { method: 'POST', body: {} })
     assert.equal(submitted.body.status, 'submitted')
+    const blockedReceiptCancel = await api(`/receipts/${cash.body.receipt.id}/cancel`, { method:'POST', body:{reason:'ทดสอบห้ามยกเลิกหลังนำส่ง'} })
+    assert.equal(blockedReceiptCancel.response.status,409)
+    const selfApproval = await api(`/remittances/${remittance.body.id}/approve`, { method: 'POST', body: { revenueTransferReference:'REV-SELF',depositTransferReference:'DEP-SELF',universityReceiptNo: 'SDU-SELF' } })
+    assert.equal(selfApproval.response.status, 409)
+    token=checkerToken
     const missingTransfer = await api(`/remittances/${remittance.body.id}/approve`, { method: 'POST', body: { universityReceiptNo: 'SDU-001' } })
     assert.equal(missingTransfer.response.status, 400)
     const approved = await api(`/remittances/${remittance.body.id}/approve`, { method: 'POST', body: { revenueTransferReference: 'REV-001', depositTransferReference: 'DEP-001', universityReceiptNo: 'SDU-001' } })
     assert.equal(approved.body.status, 'approved')
+    const adminAgain = await api('/auth/login', { method:'POST', body:{username:'admin',password:'Admin@1234'} })
+    token=adminAgain.body.token
     const noReason = await api(`/remittances/${remittance.body.id}/cancel`, { method: 'POST', body: { reason: '' } })
     assert.equal(noReason.response.status, 400)
     const cancelled = await api(`/remittances/${remittance.body.id}/cancel`, { method: 'POST', body: { reason: 'ยกเลิกเพื่อแก้ไขเลขที่ใบเสร็จมหาวิทยาลัย' } })
     assert.equal(cancelled.body.status, 'cancelled')
+  })
+
+  await t.test('late fees are Config-driven and delinquency rules are idempotent by tenant type', async()=>{
+    for(const [dueDate,type] of [['2026-07-05','water'],['2026-08-05','electricity']]){
+      const invoice=await issueConfiguredInvoice(tenantId,dueDate,[{itemType:type,description:`ค่าสาธารณูปโภค ${dueDate.slice(0,7)}`,quantity:1,unitPrice:50}])
+      assert.equal(invoice.response.status,201)
+    }
+    const assessed=await api('/finance/assess-late-fees',{method:'POST',body:{asOf:'2026-09-06'}})
+    assert.equal(assessed.response.status,201)
+    assert.ok(assessed.body.createdCount>=2)
+    assert.ok(assessed.body.invoices.every(item=>item.amount===100))
+    const repeated=await api('/finance/assess-late-fees',{method:'POST',body:{asOf:'2026-09-06'}})
+    assert.equal(repeated.body.createdCount,0)
+    const delinquency=await api('/finance/delinquency?asOf=2026-09-06')
+    const student=delinquency.body.rows.find(item=>item.tenant_id===tenantId)
+    assert.equal(student.threshold_reached,true)
+    assert.equal(student.required_action,'ยุติการเช่าห้องพัก')
+  })
+
+  await t.test('bank CSV reconciliation retains every matched and rejected row',async()=>{
+    const invoice=await issueConfiguredInvoice(tenantId,'2026-09-15',[{itemType:'other',description:'ค่าธรรมเนียมทดสอบธนาคาร',unitPrice:250}])
+    const csv=`invoice_no,amount,reference_no,paid_at\n${invoice.body.invoice_no},250,KBANK-UNIQUE-001,2026-09-10T09:00:00.000Z`
+    const imported=await api('/bank-imports',{method:'POST',body:{bankCode:'KASIKORN',filename:'statement.csv',csv}})
+    assert.equal(imported.response.status,201)
+    assert.equal(imported.body.successCount,1)
+    assert.equal(db.prepare(`SELECT status FROM bank_import_rows WHERE bank_import_id=?`).get(imported.body.id).status,'matched')
+    const duplicate=await api('/bank-imports',{method:'POST',body:{bankCode:'KASIKORN',filename:'statement-duplicate.csv',csv}})
+    assert.equal(duplicate.body.errorCount,1)
+    assert.equal(db.prepare(`SELECT status FROM bank_import_rows WHERE bank_import_id=?`).get(duplicate.body.id).status,'error')
   })
 
   await t.test('room status requires a reason when damaged', async () => {
@@ -294,7 +348,7 @@ test('critical dormitory backend flows', async (t) => {
     token = tenantLogin.body.token
     const ownContracts = await api('/contracts')
     assert.equal(ownContracts.response.status, 200)
-    assert.equal(ownContracts.body.length, 1)
+    assert.ok(ownContracts.body.some(item=>item.id===contract.body.id))
     const wrongSignature = await api(`/contracts/${contract.body.id}/sign`, { method: 'POST', body: { password: 'Wrong@123', confirmed: true } })
     assert.equal(wrongSignature.response.status, 401)
     const signed = await api(`/contracts/${contract.body.id}/sign`, { method: 'POST', body: { password: 'Student@123', confirmed: true } })
@@ -311,7 +365,7 @@ test('critical dormitory backend flows', async (t) => {
     ])
     const duplicateSignature = await api(`/contracts/${contract.body.id}/sign`, { method: 'POST', body: { password: 'Student@123', confirmed: true } })
     assert.equal(duplicateSignature.response.status, 409)
-    assert.equal(db.prepare(`SELECT COUNT(*) count FROM invoices WHERE contract_id=?`).get(contract.body.id).count, 1)
+    assert.equal(db.prepare(`SELECT COUNT(*) count FROM invoices WHERE contract_id=? AND source_type='contract'`).get(contract.body.id).count, 1)
     const pdfResponse = await fetch(`${base}/contracts/${contract.body.id}/document`, { headers: { authorization: `Bearer ${token}` } })
     assert.equal(pdfResponse.status, 200)
     assert.equal(pdfResponse.headers.get('content-type'), 'application/pdf')
@@ -407,6 +461,7 @@ test('critical dormitory backend flows', async (t) => {
       { tenantCode: 'SF690001', tenantType: 'staff', firstName: 'สมชาย', lastName: 'บุคลากร', organization: 'กองอาคารสถานที่', scope: 'bed', contractType: 'STAFF_MONTH', username: 'staff690001', password: 'Staff@1234', expectedRent: 2000, expectedTotal: 4000 },
       { tenantCode: 'EX690001', tenantType: 'external', firstName: 'สมศรี', lastName: 'ภายนอก', organization: 'บริษัท ทดสอบ จำกัด', scope: 'room', contractType: 'EXTERNAL_MONTH', username: 'external690001', password: 'External@1234', expectedRent: 5000, expectedTotal: 7000 },
     ]
+    const overdueTenantIds=[]
 
     for (const item of cases) {
       const tenant = await api('/tenants', { method: 'POST', body: { tenantCode: item.tenantCode, tenantType: item.tenantType, firstName: item.firstName, lastName: item.lastName, nationalId: item.tenantType === 'staff' ? '1101700000002' : '1101700000003', email: `${item.username}@example.test`, phone: '0833333333', currentAddress: 'สุพรรณบุรี', organization: item.organization, emergencyContactName: 'ผู้ติดต่อฉุกเฉิน', emergencyContactPhone: '0844444444', emergencyContactRelation: 'ญาติ', legalEntity: item.tenantType === 'external' } })
@@ -440,7 +495,12 @@ test('critical dormitory backend flows', async (t) => {
       assert.equal(db.prepare(`SELECT total FROM invoices WHERE contract_id=?`).get(contract.body.id).total, item.expectedTotal)
       assert.equal(db.prepare(`SELECT COUNT(*) count FROM contract_documents WHERE lease_id=? AND document_state='signed'`).get(contract.body.id).count, 1)
       token = adminLogin.body.token
+      const overdue=await issueConfiguredInvoice(tenant.body.id,'2026-09-05',[{itemType:'room',description:`ค่าเช่าค้างชำระ ${item.tenantCode}`,unitPrice:100}])
+      assert.equal(overdue.response.status,201)
+      overdueTenantIds.push(tenant.body.id)
     }
+    const delinquency=await api('/finance/delinquency?asOf=2026-10-06')
+    for(const overdueTenantId of overdueTenantIds){const row=delinquency.body.rows.find(item=>item.tenant_id===overdueTenantId);assert.equal(row.threshold_reached,true);assert.match(row.required_action,/บอกเลิกสัญญา/)}
   })
 
   let inventoryItemId
@@ -487,8 +547,10 @@ test('critical dormitory backend flows', async (t) => {
   await t.test('tenant portal is isolated to the signed-in tenant', async () => {
     const otherTenant = await api('/tenants', { method: 'POST', body: { tenantCode: 'EXT690002', tenantType: 'external', firstName: 'ผู้เช่า', lastName: 'คนอื่น', email: 'other@example.test', currentAddress: 'สุพรรณบุรี' } })
     assert.equal(otherTenant.response.status, 201)
-    const otherInvoice = await api('/invoices', { method: 'POST', body: { tenantId: otherTenant.body.id, dueDate: '2026-09-05', items: [{ itemType: 'room', description: 'ค่าเช่าของผู้เช่าคนอื่น', quantity: 1, unitPrice: 5000 }] } })
-    assert.equal(otherInvoice.response.status, 201)
+    const blockedInvoice = await issueConfiguredInvoice(otherTenant.body.id,'2026-09-05',[{ itemType: 'room', description: 'ค่าเช่าของผู้เช่าคนอื่น', quantity: 1, unitPrice: 5000 }])
+    assert.equal(blockedInvoice.response.status, 409)
+    assert.equal(blockedInvoice.body.error,'SIGNED_CONTRACT_REQUIRED')
+    const otherInvoice = db.prepare(`SELECT i.* FROM invoices i JOIN tenants t ON t.id=i.tenant_id WHERE i.tenant_id!=? AND t.tenant_type='external' ORDER BY i.id DESC LIMIT 1`).get(tenantId)
     const otherRepair = await api('/repairs', { method: 'POST', body: { roomId: occupiedRoomId, tenantId: otherTenant.body.id, source: 'staff', title: 'งานซ่อมของผู้เช่าคนอื่น', detail: 'ใช้ทดสอบการแยกข้อมูล', priority: 'normal' } })
     assert.equal(otherRepair.response.status, 201)
 
@@ -500,8 +562,8 @@ test('critical dormitory backend flows', async (t) => {
 
     const ownInvoices = await api('/invoices')
     assert.ok(ownInvoices.body.every(item => item.tenant_id === tenantId))
-    assert.ok(!ownInvoices.body.some(item => item.id === otherInvoice.body.id))
-    const crossTenantProof = await api('/payment-proofs', { method: 'POST', body: { invoiceId: otherInvoice.body.id, amount: 5000, referenceNo: 'INVALID-CROSS-TENANT', paidAt: '2026-09-01T10:00:00.000Z', filename: 'proof.pdf', mimeType: 'application/pdf', fileBase64: Buffer.from('cross tenant proof').toString('base64') } })
+    assert.ok(!ownInvoices.body.some(item => item.id === otherInvoice.id))
+    const crossTenantProof = await api('/payment-proofs', { method: 'POST', body: { invoiceId: otherInvoice.id, amount: Math.min(5000,otherInvoice.balance), referenceNo: 'INVALID-CROSS-TENANT', paidAt: '2026-09-01T10:00:00.000Z', filename: 'proof.pdf', mimeType: 'application/pdf', fileBase64: Buffer.from('cross tenant proof').toString('base64') } })
     assert.equal(crossTenantProof.response.status, 403)
 
     const ownContracts = await api('/contracts')
@@ -584,18 +646,18 @@ test('critical dormitory backend flows', async (t) => {
   await t.test('general reports calculate remittance rules and export sortable Excel', async () => {
     const adminLogin = await api('/auth/login', { method: 'POST', body: { username: 'admin', password: 'Admin@1234' } })
     token = adminLogin.body.token
-    const invoice = await api('/invoices', { method: 'POST', body: { tenantId, dueDate: '2026-09-05', items: [
+    const invoice = await issueConfiguredInvoice(tenantId,'2026-09-05',[
       { itemType: 'room', description: 'ค่าเช่าห้องพัก', quantity: 1, unitPrice: 1000 },
       { itemType: 'water', description: 'ค่าน้ำประปา', quantity: 1, unitPrice: 100 },
       { itemType: 'electricity', description: 'ค่าไฟฟ้า', quantity: 1, unitPrice: 200 },
       { itemType: 'late_fee', description: 'ค่าปรับชำระล่าช้า', quantity: 1, unitPrice: 100 },
       { itemType: 'deposit', description: 'เงินประกันห้องพัก', quantity: 1, unitPrice: 2000 },
       { itemType: 'food_beverage', description: 'ค่าอาหารและเครื่องดื่ม', quantity: 1, unitPrice: 500 },
-    ] } })
+    ])
     assert.equal(invoice.response.status, 201)
     const paid = await api('/payments', { method: 'POST', body: { invoiceId: invoice.body.id, amount: 3900, method: 'cash', referenceNo: 'REPORT-001', paidAt: '2026-09-01T09:00:00.000Z' } })
     assert.equal(paid.response.status, 201)
-    const dailyRemittance = await api('/remittances', { method: 'POST', body: { date: '2026-09-01' } })
+    const dailyRemittance = await api('/remittances', { method: 'POST', body: { date: '2026-09-01', holdingStatementAmount:3900, cashDepositReference:'CASH-DEP-REPORT' } })
     assert.equal(dailyRemittance.response.status, 201)
 
     const utilities = await api('/reports/general?type=utilities&from=2026-09-01&to=2026-09-30&period=monthly')
@@ -610,7 +672,7 @@ test('critical dormitory backend flows', async (t) => {
 
     const issuer = await api('/reports/general?type=receipts-by-issuer&from=2026-09-01&to=2026-09-30')
     assert.equal(issuer.response.status, 200)
-    assert.ok(issuer.body.rows.some(row => row.issuer === 'ผู้ดูแลระบบ' && row.amount === 3900))
+    assert.ok(issuer.body.rows.some(row => row.issuer === 'ผู้ดูแลระบบ' && row.amount === 4150))
     const daily = await api('/reports/general?type=daily-payment-summary&from=2026-09-01&to=2026-09-30')
     assert.deepEqual(daily.body.rows[0], { payment_date: '2026-09-01', transaction_count: 1, receipt_count: 1, amount: 3900 })
     const remittanceRegister = await api('/reports/general?type=daily-remittance-register&from=2026-09-01&to=2026-09-30')

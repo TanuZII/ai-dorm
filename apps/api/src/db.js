@@ -234,7 +234,7 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
     );
     CREATE TABLE IF NOT EXISTS fee_types (
       id INTEGER PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, default_amount REAL NOT NULL DEFAULT 0,
-      active INTEGER NOT NULL DEFAULT 1
+      item_type TEXT NOT NULL DEFAULT 'other', active INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE IF NOT EXISTS invoices (
       id INTEGER PRIMARY KEY, invoice_no TEXT NOT NULL UNIQUE, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
@@ -265,6 +265,13 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
       success_count INTEGER NOT NULL, error_count INTEGER NOT NULL, imported_by INTEGER NOT NULL,
       imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS bank_import_rows (
+      id INTEGER PRIMARY KEY, bank_import_id INTEGER NOT NULL REFERENCES bank_imports(id), row_no INTEGER NOT NULL,
+      invoice_no TEXT, amount REAL, reference_no TEXT, paid_at TEXT,
+      status TEXT NOT NULL CHECK(status IN ('matched','error')), error_message TEXT,
+      invoice_id INTEGER REFERENCES invoices(id), payment_id INTEGER REFERENCES payments(id), receipt_id INTEGER REFERENCES receipts(id),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(bank_import_id,row_no)
+    );
     CREATE TABLE IF NOT EXISTS payment_proofs (
       id INTEGER PRIMARY KEY, invoice_id INTEGER NOT NULL REFERENCES invoices(id),
       tenant_id INTEGER NOT NULL REFERENCES tenants(id), amount REAL NOT NULL CHECK(amount > 0),
@@ -283,6 +290,12 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
       submitted_by INTEGER, submitted_at TEXT, approved_by INTEGER, approved_at TEXT,
       cancelled_reason TEXT, cancelled_by INTEGER, cancelled_at TEXT,
       created_by INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS remittance_receipts (
+      remittance_id INTEGER NOT NULL REFERENCES remittances(id),
+      receipt_id INTEGER NOT NULL REFERENCES receipts(id),
+      amount REAL NOT NULL CHECK(amount > 0),
+      PRIMARY KEY(remittance_id,receipt_id)
     );
 
     CREATE TABLE IF NOT EXISTS repairs (
@@ -361,7 +374,21 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
   ensureColumn(db, 'leases', 'rate_snapshot_json', 'TEXT')
   ensureColumn(db, 'invoices', 'contract_id', 'INTEGER REFERENCES leases(id)')
   ensureColumn(db, 'invoices', 'email_sent_at', 'TEXT')
-  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_contract ON invoices(contract_id) WHERE contract_id IS NOT NULL')
+  ensureColumn(db, 'invoices', 'source_type', "TEXT NOT NULL DEFAULT 'manual'")
+  ensureColumn(db, 'invoices', 'source_id', 'INTEGER')
+  ensureColumn(db, 'invoices', 'late_fee_assessed_at', 'TEXT')
+  db.exec('DROP INDEX IF EXISTS idx_invoices_contract')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_contract ON invoices(contract_id) WHERE contract_id IS NOT NULL')
+  db.exec('DROP INDEX IF EXISTS idx_invoice_source')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_invoice_source ON invoices(source_type,source_id) WHERE source_id IS NOT NULL')
+  db.exec('DROP INDEX IF EXISTS idx_payment_reference')
+  db.exec("CREATE INDEX IF NOT EXISTS idx_payment_reference_lookup ON payments(method,reference_no) WHERE reference_no IS NOT NULL AND method!='cash'")
+  ensureColumn(db, 'remittances', 'holding_statement_amount', 'REAL')
+  ensureColumn(db, 'remittances', 'reconciliation_difference', 'REAL')
+  ensureColumn(db, 'remittances', 'cash_deposit_reference', 'TEXT')
+  ensureColumn(db, 'remittances', 'reconciled_by', 'INTEGER')
+  ensureColumn(db, 'remittances', 'reconciled_at', 'TEXT')
+  ensureColumn(db, 'fee_types', 'item_type', "TEXT NOT NULL DEFAULT 'other'")
   ensureColumn(db, 'announcements', 'expires_at', 'TEXT')
   ensureColumn(db, 'announcements', 'message_type', "TEXT NOT NULL DEFAULT 'general'")
   ensureColumn(db, 'announcements', 'entity_id', 'INTEGER')
@@ -406,9 +433,10 @@ function seed(db) {
       db.prepare(`INSERT OR IGNORE INTO beds(room_id,bed_no) VALUES (?,'B')`).run(roomRow.id)
     }
   }
-  db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('ROOM','ค่าห้องพัก',0)`).run()
-  db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('DEPOSIT','เงินประกัน',2000)`).run()
-  db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('LATE_FEE','ค่าปรับชำระล่าช้า',100)`).run()
+  db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount,item_type) VALUES ('ROOM','ค่าห้องพัก',0,'room')`).run()
+  db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount,item_type) VALUES ('DEPOSIT','เงินประกัน',2000,'deposit')`).run()
+  db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount,item_type) VALUES ('LATE_FEE','ค่าปรับชำระล่าช้า',100,'late_fee')`).run()
+  db.exec(`UPDATE fee_types SET item_type=CASE code WHEN 'ROOM' THEN 'room' WHEN 'DEPOSIT' THEN 'deposit' WHEN 'LATE_FEE' THEN 'late_fee' ELSE item_type END WHERE code IN ('ROOM','DEPOSIT','LATE_FEE')`)
   db.prepare(`INSERT INTO utility_rates(utility_type,unit_rate,minimum_charge,starts_at)
     SELECT 'water',23,0,'2000-01-01' WHERE NOT EXISTS (SELECT 1 FROM utility_rates WHERE utility_type='water')`).run()
   db.prepare(`INSERT INTO utility_rates(utility_type,unit_rate,minimum_charge,starts_at)
