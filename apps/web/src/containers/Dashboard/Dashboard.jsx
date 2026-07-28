@@ -103,7 +103,7 @@ function Dashboard({ user, onLogout }) {
           : active === 'Check-out และเงินประกัน' ? <CheckoutDesk notify={notify} />
           : active === 'ผู้เช่า' ? <Tenants notify={notify} />
           : active === 'งานซ่อม' ? <Repairs notify={notify} />
-          : active === 'สต็อก' ? <Inventory notify={notify} />
+          : active === 'สต็อก' ? <Inventory notify={notify} user={user} />
           : active === 'ประกาศ' ? <Announcements notify={notify} />
           : active === 'รายงาน' ? <Reports notify={notify} />
           : active === 'ผู้ใช้และสิทธิ์' ? <Administration key="admin" notify={notify} user={user} />

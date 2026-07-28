@@ -527,6 +527,8 @@ test('critical dormitory backend flows', async (t) => {
     }
     const usage = await api(`/repairs/${repair.body.id}/inventory-usage`, { method: 'POST', body: { itemId: inventoryItemId, quantity: 1 } })
     assert.equal(usage.response.status, 201)
+    const stockMovement=db.prepare(`SELECT * FROM inventory_movements WHERE item_id=? AND reference=?`).get(inventoryItemId,`งานซ่อม #${repair.body.id}`)
+    assert.equal(stockMovement.movement_type,'out')
     const completed = await api(`/repairs/${repair.body.id}/updates`, { method: 'POST', body: { status: 'completed', detail: 'เปลี่ยนหลอดไฟและทดสอบแล้ว' } })
     assert.equal(completed.response.status, 200)
     const closed = await api(`/repairs/${repair.body.id}/updates`, { method: 'POST', body: { status: 'closed', detail: 'เจ้าหน้าที่ตรวจรับและปิดงาน' } })
@@ -563,6 +565,11 @@ test('critical dormitory backend flows', async (t) => {
     const ownInvoices = await api('/invoices')
     assert.ok(ownInvoices.body.every(item => item.tenant_id === tenantId))
     assert.ok(!ownInvoices.body.some(item => item.id === otherInvoice.id))
+    const otherInvoiceDocument=await fetch(`${base}/invoices/${otherInvoice.id}/document`,{headers:{authorization:`Bearer ${token}`}})
+    assert.equal(otherInvoiceDocument.status,404)
+    const otherContract=db.prepare(`SELECT id FROM leases WHERE tenant_id!=? AND document_status='signed' ORDER BY id DESC LIMIT 1`).get(tenantId)
+    const otherContractDocument=await fetch(`${base}/contracts/${otherContract.id}/document`,{headers:{authorization:`Bearer ${token}`}})
+    assert.equal(otherContractDocument.status,404)
     const crossTenantProof = await api('/payment-proofs', { method: 'POST', body: { invoiceId: otherInvoice.id, amount: Math.min(5000,otherInvoice.balance), referenceNo: 'INVALID-CROSS-TENANT', paidAt: '2026-09-01T10:00:00.000Z', filename: 'proof.pdf', mimeType: 'application/pdf', fileBase64: Buffer.from('cross tenant proof').toString('base64') } })
     assert.equal(crossTenantProof.response.status, 403)
 
@@ -660,6 +667,19 @@ test('critical dormitory backend flows', async (t) => {
     const dailyRemittance = await api('/remittances', { method: 'POST', body: { date: '2026-09-01', holdingStatementAmount:3900, cashDepositReference:'CASH-DEP-REPORT' } })
     assert.equal(dailyRemittance.response.status, 201)
 
+    const policies=await api('/revenue-share-policies')
+    assert.ok(policies.body.some(row=>row.item_type==='room'&&row.reclaim_rate===0.8&&row.university_rate===0.2))
+    const invalidPolicy=await api('/revenue-share-policies',{method:'POST',body:{code:'INVALID_SPLIT',itemType:'room',revenueGroup:'ทดสอบ',revenueName:'ทดสอบ',reclaimRate:0.7,universityRate:0.2,startsAt:'2027-01-01'}})
+    assert.equal(invalidPolicy.response.status,400)
+    const futurePolicy=await api('/revenue-share-policies',{method:'POST',body:{code:'DORM_ROOM_NEW',itemType:'room',revenueGroup:'รายได้หอพัก',revenueName:'ค่าห้องพัก',reclaimRate:0.7,universityRate:0.3,startsAt:'2026-10-01'}})
+    assert.equal(futurePolicy.response.status,201)
+    const futureInvoice=await issueConfiguredInvoice(tenantId,'2026-10-05',[{itemType:'room',description:'ค่าห้องพัก',quantity:1,unitPrice:100}])
+    assert.equal(futureInvoice.response.status,201)
+    const futurePayment=await api('/payments',{method:'POST',body:{invoiceId:futureInvoice.body.id,amount:100,method:'transfer',referenceNo:'POLICY-NEW',paidAt:'2026-10-02T09:00:00.000Z'}})
+    assert.equal(futurePayment.response.status,201)
+    const futureRemittance=await api('/reports/general?type=revenue-remittance&from=2026-10-01&to=2026-10-31')
+    assert.ok(futureRemittance.body.rows.some(row=>row.policy_code==='DORM_ROOM_NEW'&&row.reclaim_amount===70&&row.university_amount===30))
+
     const utilities = await api('/reports/general?type=utilities&from=2026-09-01&to=2026-09-30&period=monthly')
     assert.equal(utilities.response.status, 200)
     assert.equal(utilities.body.rows[0].water, 100)
@@ -669,6 +689,11 @@ test('critical dormitory backend flows', async (t) => {
     assert.ok(remittance.body.rows.some(row => row.revenue_type === 'ค่าห้องพัก' && row.reclaim_amount === 800 && row.university_amount === 200))
     assert.ok(remittance.body.rows.some(row => row.revenue_type === 'ค่าน้ำประปา' && row.university_amount === 100))
     assert.ok(remittance.body.rows.some(row => row.revenue_type === 'ค่าอาหารและเครื่องดื่ม' && row.reclaim_amount === 500 && row.university_amount === 0))
+    const dailyRevenue=await api('/reports/general?type=revenue-remittance&from=2026-09-01&to=2026-09-01')
+    assert.equal(dailyRevenue.body.rows.reduce((sum,row)=>sum+row.full_amount,0),dailyRemittance.body.revenue_amount)
+    assert.equal(dailyRevenue.body.rows.reduce((sum,row)=>sum+row.reclaim_amount+row.university_amount,0),dailyRemittance.body.revenue_amount)
+    const depositSnapshot=await api('/reports/general?type=deposits-balance&from=2026-09-15&to=2026-09-30')
+    assert.ok(depositSnapshot.body.rows.some(row=>row.tenant_code==='ST690001'&&row.received>=2000))
 
     const issuer = await api('/reports/general?type=receipts-by-issuer&from=2026-09-01&to=2026-09-30')
     assert.equal(issuer.response.status, 200)
@@ -690,6 +715,8 @@ test('critical dormitory backend flows', async (t) => {
     assert.ok(workbook.length > 5000)
     const parsedWorkbook = await XlsxPopulate.fromDataAsync(workbook)
     assert.equal(parsedWorkbook.sheet('รายงาน').cell('A5').value(), 'งวดรับชำระ')
+    const catalog=await api('/reports/catalog')
+    for(const definition of catalog.body){const exported=await fetch(`${base}/reports/general/export.xlsx?type=${definition.type}&from=2026-01-01&to=2026-12-31&period=monthly`,{headers:{authorization:`Bearer ${token}`}});assert.equal(exported.status,200,definition.type);assert.equal(Buffer.from(await exported.arrayBuffer()).subarray(0,2).toString(),'PK',definition.type)}
   })
 
   await t.test('announcements respect room audience and comment setting', async () => {

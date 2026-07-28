@@ -20,10 +20,10 @@ const columns = {
   room: [{ key: 'period', label: 'งวดรับชำระ' }, { key: 'transaction_count', label: 'จำนวนรายการ', type: 'number' }, moneyColumn({ key: 'amount', label: 'ค่าเช่าห้องพัก' })],
   utilities: [{ key: 'period', label: 'งวดรับชำระ' }, moneyColumn({ key: 'water', label: 'ค่าน้ำประปา' }), moneyColumn({ key: 'electricity', label: 'ค่าไฟฟ้า' }), moneyColumn({ key: 'amount', label: 'รวมสาธารณูปโภค' })],
   simplePayment: [{ key: 'period', label: 'งวดรับชำระ' }, { key: 'transaction_count', label: 'จำนวนรายการ', type: 'number' }, moneyColumn({ key: 'amount', label: 'จำนวนเงิน' })],
-  depositReceived: [{ key: 'tenant_code', label: 'รหัสผู้เช่า' }, { key: 'tenant_name', label: 'ชื่อผู้จ่ายเงินประกัน' }, moneyColumn({ key: 'amount', label: 'รับเงินประกัน' })],
-  depositRefunded: [{ key: 'tenant_code', label: 'รหัสผู้เช่า' }, { key: 'tenant_name', label: 'ชื่อผู้รับคืนเงินประกัน' }, { key: 'checkout_date', label: 'วันที่คืน', type: 'date' }, moneyColumn({ key: 'amount', label: 'คืนเงินประกัน' })],
+  depositReceived: [{ key: 'period', label: 'งวดรับชำระ' }, { key: 'tenant_code', label: 'รหัสผู้เช่า' }, { key: 'tenant_name', label: 'ชื่อผู้จ่ายเงินประกัน' }, moneyColumn({ key: 'amount', label: 'รับเงินประกัน' })],
+  depositRefunded: [{ key: 'period', label: 'งวดคืนเงิน' }, { key: 'tenant_code', label: 'รหัสผู้เช่า' }, { key: 'tenant_name', label: 'ชื่อผู้รับคืนเงินประกัน' }, moneyColumn({ key: 'amount', label: 'คืนเงินประกัน' })],
   depositBalance: [{ key: 'tenant_code', label: 'รหัสผู้เช่า' }, { key: 'tenant_name', label: 'ชื่อผู้เช่า' }, moneyColumn({ key: 'received', label: 'รับเงินประกัน' }), moneyColumn({ key: 'refunded', label: 'คืนเงินประกัน' }), moneyColumn({ key: 'balance', label: 'คงเหลือ' })],
-  remittance: [{ key: 'revenue_group', label: 'กลุ่มรายได้' }, { key: 'revenue_type', label: 'ประเภทรายได้' }, moneyColumn({ key: 'full_amount', label: 'นำส่งเต็ม 100%' }), moneyColumn({ key: 'reclaim_amount', label: 'ขอเบิกกลับ' }), moneyColumn({ key: 'university_amount', label: 'นำส่งมหาวิทยาลัย' })],
+  remittance: [{ key: 'policy_code', label: 'รหัสนโยบาย' }, { key: 'revenue_group', label: 'กลุ่มรายได้' }, { key: 'revenue_type', label: 'ประเภทรายได้' }, { key:'reclaim_percent',label:'ขอเบิกกลับ (%)',type:'percentage' }, { key:'university_percent',label:'นำส่ง (%)',type:'percentage' }, moneyColumn({ key: 'full_amount', label: 'ยอดรับจริง' }), moneyColumn({ key: 'reclaim_amount', label: 'ขอเบิกกลับ' }), moneyColumn({ key: 'university_amount', label: 'นำส่งมหาวิทยาลัย' })],
   receiptIssuer: [{ key: 'issuer', label: 'ผู้ออกใบเสร็จ' }, { key: 'receipt_count', label: 'จำนวนใบเสร็จ', type: 'number' }, moneyColumn({ key: 'amount', label: 'ยอดรับชำระ' })],
   dailyPayment: [{ key: 'payment_date', label: 'วันที่รับชำระ', type: 'date' }, { key: 'transaction_count', label: 'จำนวนรายการ', type: 'number' }, { key: 'receipt_count', label: 'จำนวนใบเสร็จ', type: 'number' }, moneyColumn({ key: 'amount', label: 'ยอดรับชำระ' })],
   dailyRemittance: [{ key: 'remittance_no', label: 'เลขที่ใบนำส่ง' }, { key: 'remittance_date', label: 'วันที่นำส่ง', type: 'date' }, moneyColumn({ key: 'revenue_amount', label: 'รายได้' }), moneyColumn({ key: 'deposit_amount', label: 'เงินประกัน' }), moneyColumn({ key: 'cash_amount', label: 'เงินสด' }), moneyColumn({ key: 'transfer_amount', label: 'เงินโอน' }), { key: 'status', label: 'สถานะ' }, { key: 'university_receipt_no', label: 'เลขใบเสร็จมหาวิทยาลัย' }],
@@ -44,8 +44,8 @@ export const reportCatalog = [
   { type: 'utilities', group: 'การรับชำระ', title: 'การรับชำระค่าน้ำประปาและค่าไฟฟ้า', columns: columns.utilities, supportsPeriod: true },
   { type: 'late-fees', group: 'การรับชำระ', title: 'การรับชำระค่าปรับชำระล่าช้า', columns: columns.simplePayment, supportsPeriod: true },
   { type: 'other-payments', group: 'การรับชำระ', title: 'การรับชำระเงินอื่น ๆ', columns: columns.simplePayment, supportsPeriod: true },
-  { type: 'deposits-received', group: 'เงินประกัน', title: 'รายชื่อผู้จ่ายเงินประกันห้องพัก', columns: columns.depositReceived },
-  { type: 'deposits-refunded', group: 'เงินประกัน', title: 'รายชื่อผู้รับคืนเงินประกันห้องพัก', columns: columns.depositRefunded },
+  { type: 'deposits-received', group: 'เงินประกัน', title: 'รายชื่อผู้จ่ายเงินประกันห้องพัก', columns: columns.depositReceived, supportsPeriod:true },
+  { type: 'deposits-refunded', group: 'เงินประกัน', title: 'รายชื่อผู้รับคืนเงินประกันห้องพัก', columns: columns.depositRefunded, supportsPeriod:true },
   { type: 'deposits-balance', group: 'เงินประกัน', title: 'เงินประกันห้องพักคงเหลือ', columns: columns.depositBalance },
   { type: 'revenue-remittance', group: 'นำส่งรายได้', title: 'รายการนำส่งเงินรายได้เข้ามหาวิทยาลัย', columns: columns.remittance },
 ]
@@ -77,27 +77,20 @@ function paidRows(db, itemTypes, query, extraSelect = 'SUM(ii.amount*(p.amount/i
 
 function depositReceivedRows(db, query) {
   const { from, to } = dateRange(query)
-  return db.prepare(`SELECT t.tenant_code,t.first_name||' '||t.last_name tenant_name,ROUND(SUM(ii.amount*(p.amount/i.total)),2) amount
+  const period = ['daily','monthly','term','yearly'].includes(query.period) ? query.period : 'monthly'
+  return db.prepare(`SELECT ${periodSql(period)} period,t.tenant_code,t.first_name||' '||t.last_name tenant_name,ROUND(SUM(ii.amount*(p.amount/i.total)),2) amount
     FROM payments p JOIN receipts r ON r.payment_id=p.id JOIN invoices i ON i.id=p.invoice_id JOIN invoice_items ii ON ii.invoice_id=i.id JOIN tenants t ON t.id=i.tenant_id
-    WHERE r.status='issued' AND ii.item_type='deposit' AND date(p.paid_at) BETWEEN ? AND ? GROUP BY t.id ORDER BY t.tenant_code`).all(from, to)
-}
-
-const remittanceRules = {
-  room: ['รายได้หอพัก', 'ค่าห้องพัก', .8, .2], late_fee: ['รายได้หอพัก', 'ค่าปรับชำระล่าช้า', .8, .2], other: ['รายได้หอพัก', 'ค่าอื่น ๆ', .8, .2],
-  water: ['รายได้หอพัก', 'ค่าน้ำประปา', 0, 1], electricity: ['รายได้หอพัก', 'ค่าไฟฟ้า', 0, 1],
-  printing_room: ['ศูนย์ความเป็นเลิศด้านการพิมพ์และบรรจุภัณฑ์', 'ค่าห้องพัก', .8, .2],
-  food_beverage: ['ศูนย์ความเป็นเลิศด้านการพิมพ์และบรรจุภัณฑ์', 'ค่าอาหารและเครื่องดื่ม', 1, 0],
-  health_field: ['ศูนย์บริการสุขภาพ', 'ค่าบริการสนาม', .8, .2], swimming_instruction: ['ศูนย์บริการสุขภาพ', 'ค่าสอนว่ายน้ำ', .8, .2],
-  health_membership: ['ศูนย์บริการสุขภาพ', 'ค่าสมาชิกรายปี', .8, .2], area_rent: ['ศูนย์บริการสุขภาพ', 'ค่าเช่าพื้นที่', 0, 1],
+    WHERE r.status='issued' AND ii.item_type='deposit' AND date(p.paid_at) BETWEEN ? AND ? GROUP BY period,t.id ORDER BY period,t.tenant_code`).all(from, to)
 }
 
 function remittanceRows(db, query) {
   const { from, to } = dateRange(query)
-  const paid = db.prepare(`SELECT ii.item_type,ROUND(SUM(ii.amount*(p.amount/i.total)),2) amount FROM payments p JOIN receipts r ON r.payment_id=p.id JOIN invoices i ON i.id=p.invoice_id JOIN invoice_items ii ON ii.invoice_id=i.id WHERE r.status='issued' AND date(p.paid_at) BETWEEN ? AND ? GROUP BY ii.item_type`).all(from, to)
-  return paid.filter(row => remittanceRules[row.item_type]).map(row => {
-    const [revenue_group, revenue_type, reclaimRate, universityRate] = remittanceRules[row.item_type]
-    return { revenue_group, revenue_type, full_amount: row.amount, reclaim_amount: Number((row.amount * reclaimRate).toFixed(2)), university_amount: Number((row.amount * universityRate).toFixed(2)) }
-  })
+  const paid = db.prepare(`SELECT ii.item_type,rp.code policy_code,rp.revenue_group,rp.revenue_name revenue_type,rp.reclaim_rate,rp.university_rate,ROUND(SUM(ii.amount*(p.amount/i.total)),2) amount
+    FROM payments p JOIN receipts r ON r.payment_id=p.id JOIN invoices i ON i.id=p.invoice_id JOIN invoice_items ii ON ii.invoice_id=i.id
+    LEFT JOIN revenue_share_policies rp ON rp.id=(SELECT policy.id FROM revenue_share_policies policy WHERE policy.item_type=ii.item_type AND date(p.paid_at)>=date(policy.starts_at) AND (policy.ends_at IS NULL OR date(p.paid_at)<=date(policy.ends_at)) ORDER BY policy.starts_at DESC,policy.id DESC LIMIT 1)
+    WHERE r.status='issued' AND ii.item_type!='deposit' AND date(p.paid_at) BETWEEN ? AND ? GROUP BY ii.item_type,rp.id ORDER BY rp.revenue_group,rp.revenue_name`).all(from, to)
+  const missing=paid.find(row=>!row.policy_code);if(missing)throw Object.assign(new Error(`ยังไม่ได้กำหนดสัดส่วนแบ่งรายได้สำหรับ ${missing.item_type}`),{status:409,code:'REVENUE_POLICY_NOT_CONFIGURED'})
+  return paid.map(row => ({ policy_code:row.policy_code,revenue_group:row.revenue_group,revenue_type:row.revenue_type,reclaim_percent:Number((row.reclaim_rate*100).toFixed(2)),university_percent:Number((row.university_rate*100).toFixed(2)),full_amount:row.amount,reclaim_amount:Number((row.amount*row.reclaim_rate).toFixed(2)),university_amount:Number((row.amount*row.university_rate).toFixed(2)) }))
 }
 
 export function buildReport(db, query = {}) {
@@ -110,10 +103,10 @@ export function buildReport(db, query = {}) {
   else if (query.type === 'room-rent') rows = paidRows(db, ['room'], query)
   else if (query.type === 'utilities') rows = paidRows(db, ['water', 'electricity'], query, `ROUND(SUM(CASE WHEN ii.item_type='water' THEN ii.amount*(p.amount/i.total) ELSE 0 END),2) water,ROUND(SUM(CASE WHEN ii.item_type='electricity' THEN ii.amount*(p.amount/i.total) ELSE 0 END),2) electricity,ROUND(SUM(ii.amount*(p.amount/i.total)),2) amount`)
   else if (query.type === 'late-fees') rows = paidRows(db, ['late_fee'], query)
-  else if (query.type === 'other-payments') rows = paidRows(db, ['other'], query)
+  else if (query.type === 'other-payments') rows = paidRows(db, ['damage','other','printing_room','food_beverage','health_field','swimming_instruction','health_membership','area_rent'], query)
   else if (query.type === 'deposits-received') rows = depositReceivedRows(db, query)
-  else if (query.type === 'deposits-refunded') { const { from, to } = dateRange(query); rows = db.prepare(`SELECT t.tenant_code,t.first_name||' '||t.last_name tenant_name,c.checkout_date,c.refund_amount amount FROM checkouts c JOIN tenants t ON t.id=c.tenant_id WHERE c.refund_amount>0 AND date(c.checkout_date) BETWEEN ? AND ? ORDER BY c.checkout_date,t.tenant_code`).all(from, to) }
-  else if (query.type === 'deposits-balance') { const { from, to } = dateRange(query); rows = db.prepare(`WITH received AS (SELECT i.tenant_id,SUM(ii.amount*(p.amount/i.total)) amount FROM payments p JOIN receipts r ON r.payment_id=p.id JOIN invoices i ON i.id=p.invoice_id JOIN invoice_items ii ON ii.invoice_id=i.id WHERE r.status='issued' AND ii.item_type='deposit' AND date(p.paid_at) BETWEEN ? AND ? GROUP BY i.tenant_id), refunded AS (SELECT tenant_id,SUM(refund_amount) amount FROM checkouts WHERE refund_amount>0 AND date(checkout_date) BETWEEN ? AND ? GROUP BY tenant_id) SELECT t.tenant_code,t.first_name||' '||t.last_name tenant_name,ROUND(COALESCE(received.amount,0),2) received,ROUND(COALESCE(refunded.amount,0),2) refunded,ROUND(COALESCE(received.amount,0)-COALESCE(refunded.amount,0),2) balance FROM tenants t LEFT JOIN received ON received.tenant_id=t.id LEFT JOIN refunded ON refunded.tenant_id=t.id WHERE COALESCE(received.amount,0)>0 OR COALESCE(refunded.amount,0)>0 ORDER BY t.tenant_code`).all(from, to, from, to) }
+  else if (query.type === 'deposits-refunded') { const { from, to } = dateRange(query),period=['daily','monthly','term','yearly'].includes(query.period)?query.period:'monthly',periodExpression=period==='daily'?"strftime('%Y-%m-%d',c.checkout_date)":period==='yearly'?"strftime('%Y',c.checkout_date)":period==='term'?"COALESCE((SELECT academic_year||' / ภาค '||term FROM academic_terms WHERE date(c.checkout_date) BETWEEN starts_at AND ends_at ORDER BY id DESC LIMIT 1),'ไม่ระบุภาคเรียน')":"strftime('%Y-%m',c.checkout_date)"; rows = db.prepare(`SELECT ${periodExpression} period,t.tenant_code,t.first_name||' '||t.last_name tenant_name,ROUND(SUM(c.refund_amount),2) amount FROM checkouts c JOIN tenants t ON t.id=c.tenant_id WHERE c.refund_amount>0 AND date(c.checkout_date) BETWEEN ? AND ? GROUP BY period,t.id ORDER BY period,t.tenant_code`).all(from, to) }
+  else if (query.type === 'deposits-balance') { const { to } = dateRange(query); rows = db.prepare(`WITH received AS (SELECT i.tenant_id,SUM(ii.amount*(p.amount/i.total)) amount FROM payments p JOIN receipts r ON r.payment_id=p.id JOIN invoices i ON i.id=p.invoice_id JOIN invoice_items ii ON ii.invoice_id=i.id WHERE r.status='issued' AND ii.item_type='deposit' AND date(p.paid_at)<=? GROUP BY i.tenant_id), refunded AS (SELECT tenant_id,SUM(refund_amount) amount FROM checkouts WHERE refund_amount>0 AND date(checkout_date)<=? GROUP BY tenant_id) SELECT t.tenant_code,t.first_name||' '||t.last_name tenant_name,ROUND(COALESCE(received.amount,0),2) received,ROUND(COALESCE(refunded.amount,0),2) refunded,ROUND(COALESCE(received.amount,0)-COALESCE(refunded.amount,0),2) balance FROM tenants t LEFT JOIN received ON received.tenant_id=t.id LEFT JOIN refunded ON refunded.tenant_id=t.id WHERE COALESCE(received.amount,0)>0 OR COALESCE(refunded.amount,0)>0 ORDER BY t.tenant_code`).all(to, to) }
   else if (query.type === 'receipts-by-issuer') { const { from, to } = dateRange(query); rows = db.prepare(`SELECT u.display_name issuer,COUNT(*) receipt_count,ROUND(SUM(p.amount),2) amount FROM receipts r JOIN payments p ON p.id=r.payment_id JOIN users u ON u.id=r.issued_by WHERE r.status='issued' AND date(p.paid_at) BETWEEN ? AND ? GROUP BY u.id ORDER BY u.display_name`).all(from, to) }
   else if (query.type === 'daily-payment-summary') { const { from, to } = dateRange(query); rows = db.prepare(`SELECT date(p.paid_at) payment_date,COUNT(DISTINCT p.id) transaction_count,COUNT(DISTINCT r.id) receipt_count,ROUND(SUM(p.amount),2) amount FROM payments p JOIN receipts r ON r.payment_id=p.id WHERE r.status='issued' AND date(p.paid_at) BETWEEN ? AND ? GROUP BY payment_date ORDER BY payment_date`).all(from, to) }
   else if (query.type === 'daily-remittance-register') { const { from, to } = dateRange(query); rows = db.prepare(`SELECT remittance_no,remittance_date,revenue_amount,deposit_amount,cash_amount,transfer_amount,status,university_receipt_no FROM remittances WHERE date(remittance_date) BETWEEN ? AND ? ORDER BY remittance_date,remittance_no`).all(from, to) }
@@ -145,8 +138,10 @@ export async function createReportXlsx(report) {
     sheet.column(letter).width(Math.min(34, Math.max(14, column.label.length + 6, ...report.rows.slice(0, 200).map(row => String(row[column.key] ?? '').length + 2))))
     if (tableRows.length && column.type === 'money') sheet.range(`${letter}6:${letter}${tableRows.length + 5}`).style({ numberFormat: '#,##0.00;[Red](#,##0.00);-' })
     if (tableRows.length && column.type === 'number') sheet.range(`${letter}6:${letter}${tableRows.length + 5}`).style({ numberFormat: '#,##0' })
+    if (tableRows.length && column.type === 'percentage') sheet.range(`${letter}6:${letter}${tableRows.length + 5}`).style({ numberFormat: '0.00' })
     if (tableRows.length && column.type === 'date') sheet.range(`${letter}6:${letter}${tableRows.length + 5}`).style({ numberFormat: 'yyyy-mm-dd' })
   })
+  if(tableRows.length){const totalRow=tableRows.length+6;sheet.cell(`A${totalRow}`).value('รวม').style({bold:true,fontFamily:'Tahoma'});report.columns.forEach((column,index)=>{if(['money','number'].includes(column.type)){const letter=excelColumnName(index+1);sheet.cell(`${letter}${totalRow}`).value(report.totals[column.key]||0).style({bold:true,fontFamily:'Tahoma',numberFormat:column.type==='money'?'#,##0.00;[Red](#,##0.00);-':'#,##0'})}});sheet.range(`A${totalRow}:${lastColumn}${totalRow}`).style({fill:'E8F5F1',fontColor:'0F5F57'})}
   return workbook.outputAsync()
 }
 

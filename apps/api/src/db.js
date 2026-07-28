@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import bcrypt from 'bcryptjs'
+import { revenueShareSeeds } from './financeTypes.js'
 
 const defaultDbFile = fileURLToPath(new URL('../../../data/dormitory.db', import.meta.url))
 
@@ -236,6 +237,17 @@ export function createDb(filename = process.env.DB_FILE || defaultDbFile) {
       id INTEGER PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, default_amount REAL NOT NULL DEFAULT 0,
       item_type TEXT NOT NULL DEFAULT 'other', active INTEGER NOT NULL DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS revenue_share_policies (
+      id INTEGER PRIMARY KEY, code TEXT NOT NULL, item_type TEXT NOT NULL,
+      revenue_group TEXT NOT NULL, revenue_name TEXT NOT NULL,
+      reclaim_rate REAL NOT NULL CHECK(reclaim_rate BETWEEN 0 AND 1),
+      university_rate REAL NOT NULL CHECK(university_rate BETWEEN 0 AND 1),
+      starts_at TEXT NOT NULL, ends_at TEXT, active INTEGER NOT NULL DEFAULT 1,
+      cancellation_reason TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(code,starts_at),
+      CHECK(ABS(reclaim_rate+university_rate-1)<0.000001)
+    );
+    CREATE INDEX IF NOT EXISTS idx_revenue_share_effective ON revenue_share_policies(item_type,starts_at,ends_at);
     CREATE TABLE IF NOT EXISTS invoices (
       id INTEGER PRIMARY KEY, invoice_no TEXT NOT NULL UNIQUE, tenant_id INTEGER NOT NULL REFERENCES tenants(id),
       due_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'issued' CHECK(status IN ('issued','partial','paid','cancelled')),
@@ -437,6 +449,8 @@ function seed(db) {
   db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount,item_type) VALUES ('DEPOSIT','เงินประกัน',2000,'deposit')`).run()
   db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount,item_type) VALUES ('LATE_FEE','ค่าปรับชำระล่าช้า',100,'late_fee')`).run()
   db.exec(`UPDATE fee_types SET item_type=CASE code WHEN 'ROOM' THEN 'room' WHEN 'DEPOSIT' THEN 'deposit' WHEN 'LATE_FEE' THEN 'late_fee' ELSE item_type END WHERE code IN ('ROOM','DEPOSIT','LATE_FEE')`)
+  const addRevenueShare=db.prepare(`INSERT OR IGNORE INTO revenue_share_policies(code,item_type,revenue_group,revenue_name,reclaim_rate,university_rate,starts_at) VALUES (?,?,?,?,?,?,'2026-01-01')`)
+  for(const row of revenueShareSeeds)addRevenueShare.run(...row)
   db.prepare(`INSERT INTO utility_rates(utility_type,unit_rate,minimum_charge,starts_at)
     SELECT 'water',23,0,'2000-01-01' WHERE NOT EXISTS (SELECT 1 FROM utility_rates WHERE utility_type='water')`).run()
   db.prepare(`INSERT INTO utility_rates(utility_type,unit_rate,minimum_charge,starts_at)
