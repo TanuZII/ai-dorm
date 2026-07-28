@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { requirePermission } from './auth.js'
 import { writeAudit } from './audit.js'
 import { notifyTenant } from './notifications.js'
+import { requireUtilityRate } from './utilityRates.js'
 
 const idSchema = z.coerce.number().int().positive()
 function validate(schema, value) { const result = schema.safeParse(value); if (result.success) return result.data; throw Object.assign(new Error(result.error.issues.map(x => x.message).join(', ')), { status: 400, code: 'VALIDATION_ERROR' }) }
@@ -20,7 +21,7 @@ const detailSql = `SELECT cr.*,t.tenant_code,t.tenant_type,t.first_name,t.last_n
 
 function requestDetail(db, id) { return db.prepare(`${detailSql} WHERE cr.id=?`).get(id) }
 function canAccess(user, row) { return !user.tenant_id || user.tenant_id === row.tenant_id }
-function currentRate(db, type, date) { return db.prepare(`SELECT unit_rate FROM utility_rates WHERE utility_type=? AND active=1 AND starts_at<=? AND (ends_at IS NULL OR ends_at>=?) ORDER BY starts_at DESC,id DESC LIMIT 1`).get(type, date, date)?.unit_rate ?? (type === 'water' ? 23 : 7) }
+function currentRate(db, type, date) { return requireUtilityRate(db, type, date) }
 function previousReading(db, roomId, type) { return db.prepare(`SELECT current_reading FROM meter_readings WHERE room_id=? AND utility_type=? ORDER BY billing_month DESC,id DESC LIMIT 1`).get(roomId, type)?.current_reading ?? 0 }
 
 export function registerCheckoutRoutes(app, db) {
@@ -66,8 +67,9 @@ export function registerCheckoutRoutes(app, db) {
       const body = validate(z.object({ inspectionNote: z.string().trim().min(1).max(2000), waterReading: z.number().nonnegative(), electricityReading: z.number().nonnegative(), damageDetail: z.string().max(2000).nullable().optional(), damageAmount: z.number().nonnegative().default(0) }), req.body)
       const waterPrevious = previousReading(db, before.room_id, 'water'), electricPrevious = previousReading(db, before.room_id, 'electricity')
       if (body.waterReading < waterPrevious || body.electricityReading < electricPrevious) fail(400, 'METER_READING_REVERSED', 'เลขมิเตอร์วันย้ายออกต้องไม่น้อยกว่าเลขครั้งล่าสุด')
-      const waterAmount = Number(((body.waterReading - waterPrevious) * currentRate(db, 'water', before.requested_checkout_date)).toFixed(2))
-      const electricAmount = Number(((body.electricityReading - electricPrevious) * currentRate(db, 'electricity', before.requested_checkout_date)).toFixed(2))
+      const waterRate = currentRate(db, 'water', before.requested_checkout_date), electricRate = currentRate(db, 'electricity', before.requested_checkout_date)
+      const waterAmount = Number(Math.max((body.waterReading - waterPrevious) * waterRate.unit_rate, waterRate.minimum_charge).toFixed(2))
+      const electricAmount = Number(Math.max((body.electricityReading - electricPrevious) * electricRate.unit_rate, electricRate.minimum_charge).toFixed(2))
       const deposit = Number(before.deposit_amount || 0), excessDamage = Math.max(0, body.damageAmount - deposit), utilityAmount = Number((waterAmount + electricAmount).toFixed(2)), invoiceTotal = Number((utilityAmount + excessDamage).toFixed(2))
       const finalInvoiceId = transaction(db, () => {
         let invoiceId = null

@@ -404,8 +404,12 @@ function seed(db) {
     }
   }
   db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('ROOM','ค่าห้องพัก',0)`).run()
-  db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('DEPOSIT','เงินประกัน',3000)`).run()
-  db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('LATE_FEE','ค่าปรับชำระล่าช้า',0)`).run()
+  db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('DEPOSIT','เงินประกัน',2000)`).run()
+  db.prepare(`INSERT OR IGNORE INTO fee_types(code,name,default_amount) VALUES ('LATE_FEE','ค่าปรับชำระล่าช้า',100)`).run()
+  db.prepare(`INSERT INTO utility_rates(utility_type,unit_rate,minimum_charge,starts_at)
+    SELECT 'water',23,0,'2000-01-01' WHERE NOT EXISTS (SELECT 1 FROM utility_rates WHERE utility_type='water')`).run()
+  db.prepare(`INSERT INTO utility_rates(utility_type,unit_rate,minimum_charge,starts_at)
+    SELECT 'electricity',7,0,'2000-01-01' WHERE NOT EXISTS (SELECT 1 FROM utility_rates WHERE utility_type='electricity')`).run()
   seedMasterData(db)
   seedPramoteBuildings(db)
   syncSpaceMasterData(db)

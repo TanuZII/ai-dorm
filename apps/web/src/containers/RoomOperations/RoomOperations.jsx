@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../services/api'
 import {
   ArrowRightLeft, BedDouble, Building2, CalendarCheck, ClipboardCheck,
-  DoorOpen, LoaderCircle, LogOut, Search, ShieldCheck, UserPlus,
+  CircleAlert, DoorOpen, LoaderCircle, LogOut, RefreshCw, Search, ShieldCheck, UserPlus,
 } from 'lucide-react'
 
 const actions = [
@@ -10,6 +10,7 @@ const actions = [
   { id: 'transfer', label: 'ย้ายห้อง', icon: ArrowRightLeft, hint: 'บันทึกห้องเดิมและใหม่' },
   { id: 'checkout', label: 'ย้ายออก', icon: LogOut, hint: 'หนี้ ความเสียหาย เงินประกัน' },
   { id: 'readiness', label: 'ตรวจความพร้อม', icon: ClipboardCheck, hint: 'ยืนยันก่อนเปิดจอง' },
+  { id: 'status', label: 'สถานะห้อง', icon: CircleAlert, hint: 'กันห้องชำรุดหรือไม่พร้อม' },
 ]
 
 const roomTone = {
@@ -18,7 +19,7 @@ const roomTone = {
 }
 
 const fieldClass = 'h-10 w-full rounded-xl border border-[#d7e1e7] bg-white px-3 text-xs outline-none transition focus:border-[#4c8fc8] focus:ring-2 focus:ring-[#4c8fc8]/15'
-const initialForm = { tenantId: '', roomId: '', bedId: '', scope: 'bed', rentalPeriod: 'term', startsAt: '', endsAt: '', toBedId: '', transferDate: '', reason: '', checkoutDate: '', damageDetail: '', damageAmount: '0', ready: true, cleanliness: false, electricity: false, water: false, furniture: false }
+const initialForm = { tenantId: '', roomId: '', bedId: '', scope: 'bed', rentalPeriod: 'term', startsAt: '', endsAt: '', toBedId: '', transferDate: '', reason: '', checkoutDate: '', damageDetail: '', damageAmount: '0', ready: true, roomStatus: 'damaged', cleanliness: false, electricity: false, water: false, furniture: false }
 
 function RoomOperations({ notify }) {
   const [tab, setTab] = useState('availability')
@@ -32,17 +33,19 @@ function RoomOperations({ notify }) {
   const [form, setForm] = useState(initialForm)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null)
 
-  const load = async () => {
-    setLoading(true)
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const [roomRows, bedRows, tenantRows, reservationRows] = await Promise.all([
         api('/rooms'), api('/beds'), api('/tenants'), api('/reservations'),
       ])
       setRooms(roomRows); setBeds(bedRows); setTenants(tenantRows); setReservations(reservationRows)
-    } catch (error) { notify(error.message) } finally { setLoading(false) }
+      setLastUpdatedAt(new Date())
+    } catch (error) { if (!silent) notify(error.message) } finally { if (!silent) setLoading(false) }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(); const intervalId = setInterval(() => load(true), 5000); return () => clearInterval(intervalId) }, [])
 
   const buildings = useMemo(() => [...new Map(rooms.map(x => [x.building_id, { id: x.building_id, name: x.building_name }])).values()], [rooms])
   const floors = useMemo(() => [...new Set(rooms.filter(x => filters.buildingId === 'all' || x.building_id === Number(filters.buildingId)).map(x => x.floor_no))].sort((a,b) => a-b), [rooms, filters.buildingId])
@@ -69,7 +72,8 @@ function RoomOperations({ notify }) {
       if (action === 'transfer') await api('/room-transfers', { method: 'POST', body: { tenantId: Number(form.tenantId), toBedId: Number(form.toBedId), transferDate: form.transferDate, reason: form.reason } })
       if (action === 'checkout') await api('/checkouts', { method: 'POST', body: { tenantId: Number(form.tenantId), checkoutDate: form.checkoutDate, damageDetail: form.damageDetail || null, damageAmount: Number(form.damageAmount) } })
       if (action === 'readiness') await api(`/rooms/${form.roomId}/readiness`, { method: 'POST', body: { ready: form.ready, checklist: { cleanliness: form.cleanliness, electricity: form.electricity, water: form.water, furniture: form.furniture }, note: form.reason || null } })
-      notify({ reserve: 'จองห้องพักเรียบร้อย', transfer: 'บันทึกการย้ายห้องแล้ว', checkout: 'ดำเนินการย้ายออกเรียบร้อย', readiness: 'ยืนยันความพร้อมห้องแล้ว' }[action])
+      if (action === 'status') await api(`/rooms/${form.roomId}/status`, { method: 'PATCH', body: { status: form.roomStatus, reason: ['damaged','unavailable'].includes(form.roomStatus) ? form.reason : null } })
+      notify({ reserve: 'จองห้องพักเรียบร้อย', transfer: 'บันทึกการย้ายห้องแล้ว', checkout: 'ดำเนินการย้ายออกเรียบร้อย', readiness: 'ยืนยันความพร้อมห้องแล้ว', status: 'อัปเดตสถานะห้องแล้ว' }[action])
       setForm(initialForm); await load()
     } catch (error) { notify(error.message) } finally { setSaving(false) }
   }
@@ -77,7 +81,7 @@ function RoomOperations({ notify }) {
   return <div className="enter-up space-y-5">
     <section className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
       <div><div className="flex items-center gap-2 text-[10px] font-semibold text-[#397caf]"><Building2 size={13}/> ศูนย์ปฏิบัติการห้องพัก 4.4</div><h2 className="mt-1 text-[25px] font-semibold tracking-[-.02em] text-[#152c46]">หนึ่งห้อง ทุกขั้นตอนการเข้าพัก</h2><p className="mt-1 text-xs text-[#718493]">ตรวจที่ว่าง จอง ย้าย ย้ายออก และยืนยันความพร้อมห้องจากข้อมูลชุดเดียวกัน</p></div>
-      <div className="flex rounded-xl border border-[#d9e3e8] bg-white p-1">{[['availability','ห้องและเตียงว่าง'],['operations','งานเข้าพัก']].map(([id,label])=><button key={id} onClick={()=>setTab(id)} className={`rounded-lg px-3 py-2 text-[11px] font-medium ${tab===id?'bg-[#173653] text-white':'text-[#6e8191]'}`}>{label}</button>)}</div>
+      <div className="flex flex-wrap items-center gap-2"><span className="text-[9px] text-[#7a8c99]">อัปเดตสถานะทุก 5 วินาที{lastUpdatedAt ? ` · ${lastUpdatedAt.toLocaleTimeString('th-TH')}` : ''}</span><button type="button" onClick={()=>load()} className="grid size-9 place-items-center rounded-xl border border-[#d9e3e8] bg-white text-[#397caf]" title="รีเฟรชทันที"><RefreshCw size={14}/></button><div className="flex rounded-xl border border-[#d9e3e8] bg-white p-1">{[['availability','ห้องและเตียงว่าง'],['operations','งานเข้าพัก']].map(([id,label])=><button key={id} onClick={()=>setTab(id)} className={`rounded-lg px-3 py-2 text-[11px] font-medium ${tab===id?'bg-[#173653] text-white':'text-[#6e8191]'}`}>{label}</button>)}</div></div>
     </section>
 
     {tab === 'availability' && <>
@@ -104,14 +108,15 @@ function RoomOperations({ notify }) {
 }
 
 function OperationForm({ action, form, update, rooms, beds: availableBeds, selectedRoomBeds, tenants, saving, onSubmit }) {
-  const title={reserve:'จองห้องหรือเตียง',transfer:'บันทึกการย้ายห้อง',checkout:'บันทึกการย้ายออก',readiness:'ยืนยันความพร้อมห้อง'}[action]
+  const title={reserve:'จองห้องหรือเตียง',transfer:'บันทึกการย้ายห้อง',checkout:'บันทึกการย้ายออก',readiness:'ยืนยันความพร้อมห้อง',status:'เปลี่ยนสถานะห้อง'}[action]
   return <form onSubmit={onSubmit} className="rounded-2xl border border-[#dfe7eb] bg-white p-5"><div className="mb-5"><p className="text-[10px] font-semibold text-[#397caf]">ขั้นตอนปฏิบัติงาน</p><h3 className="mt-1 text-lg font-semibold">{title}</h3></div><div className="grid gap-4 md:grid-cols-2">
     {['reserve','transfer','checkout'].includes(action)&&<Field label="ผู้เช่า"><select required value={form.tenantId} onChange={e=>update('tenantId',e.target.value)} className={fieldClass}><option value="">เลือกนักศึกษา บุคลากร หรือบุคคลภายนอก</option>{tenants.map(x=><option key={x.id} value={x.id}>{x.tenant_code} · {x.first_name} {x.last_name}</option>)}</select></Field>}
-    {['reserve','readiness'].includes(action)&&<Field label="ห้องพัก"><select required value={form.roomId} onChange={e=>{update('roomId',e.target.value);update('bedId','')}} className={fieldClass}><option value="">เลือกห้อง</option>{rooms.map(x=><option key={x.id} value={x.id}>{x.building_name} · ชั้น {x.floor_no} · ห้อง {x.room_no}</option>)}</select></Field>}
+    {['reserve','readiness','status'].includes(action)&&<Field label="ห้องพัก"><select required value={form.roomId} onChange={e=>{update('roomId',e.target.value);update('bedId','')}} className={fieldClass}><option value="">เลือกห้อง</option>{rooms.map(x=><option key={x.id} value={x.id}>{x.building_name} · ชั้น {x.floor_no} · ห้อง {x.room_no}</option>)}</select></Field>}
     {action==='reserve'&&<><Field label="รูปแบบการจอง"><select value={form.scope} onChange={e=>update('scope',e.target.value)} className={fieldClass}><option value="bed">จองเป็นเตียง</option><option value="room">จองทั้งห้อง</option></select></Field><Field label="รอบการเช่า"><select value={form.rentalPeriod} onChange={e=>update('rentalPeriod',e.target.value)} className={fieldClass}><option value="daily">รายวัน</option><option value="monthly">รายเดือน</option><option value="term">รายภาคเรียน</option><option value="yearly">รายปี</option></select></Field>{form.scope==='bed'&&<Field label="เตียง"><select required value={form.bedId} onChange={e=>update('bedId',e.target.value)} className={fieldClass}><option value="">เลือกเตียงว่าง</option>{selectedRoomBeds.map(x=><option key={x.id} value={x.id}>เตียง {x.bed_no}</option>)}</select></Field>}<Field label="วันที่เริ่มจอง"><input required type="date" value={form.startsAt} onChange={e=>update('startsAt',e.target.value)} className={fieldClass}/></Field><Field label="วันที่สิ้นสุด"><input type="date" value={form.endsAt} onChange={e=>update('endsAt',e.target.value)} className={fieldClass}/></Field><p className="md:col-span-2 rounded-xl bg-[#fff8e8] p-3 text-[10px] text-[#8b6418]">ระบบจะตรวจประเภทผู้เช่า รอบเช่า รูปแบบต่อคน/ต่อห้อง และจำนวนผู้พักกับ Rate Policy ก่อนยืนยันการจอง</p></>}
     {action==='transfer'&&<><Field label="เตียงปลายทาง"><select required value={form.toBedId} onChange={e=>update('toBedId',e.target.value)} className={fieldClass}><option value="">เลือกห้องและเตียงที่พร้อม</option>{availableBeds.map(x=><option key={x.id} value={x.id}>{x.building_name} · ห้อง {x.room_no} · เตียง {x.bed_no}</option>)}</select></Field><Field label="วันที่ย้าย"><input required type="date" value={form.transferDate} onChange={e=>update('transferDate',e.target.value)} className={fieldClass}/></Field><Field label="เหตุผลการย้าย" wide><textarea required minLength={5} value={form.reason} onChange={e=>update('reason',e.target.value)} className={`${fieldClass} h-20 py-3`}/></Field></>}
     {action==='checkout'&&<><Field label="วันที่ย้ายออก"><input required type="date" value={form.checkoutDate} onChange={e=>update('checkoutDate',e.target.value)} className={fieldClass}/></Field><Field label="มูลค่าความเสียหาย"><input required type="number" min="0" step="0.01" value={form.damageAmount} onChange={e=>update('damageAmount',e.target.value)} className={fieldClass}/></Field><Field label="รายละเอียดความเสียหาย" wide><textarea value={form.damageDetail} onChange={e=>update('damageDetail',e.target.value)} className={`${fieldClass} h-20 py-3`} placeholder="เว้นว่างได้หากไม่มีความเสียหาย"/></Field></>}
     {action==='readiness'&&<><Field label="ผลการตรวจ"><select value={String(form.ready)} onChange={e=>update('ready',e.target.value==='true')} className={fieldClass}><option value="true">พร้อมเปิดให้จอง</option><option value="false">ยังไม่พร้อม</option></select></Field><Field label="หมายเหตุ"><input value={form.reason} onChange={e=>update('reason',e.target.value)} className={fieldClass}/></Field><div className="md:col-span-2 grid grid-cols-2 gap-2 rounded-xl bg-[#f3f8fb] p-3 text-[10px] text-[#496579]">{[['cleanliness','ความสะอาด'],['electricity','ระบบไฟฟ้า'],['water','ระบบน้ำ'],['furniture','เฟอร์นิเจอร์']].map(([key,label])=><label key={key} className="flex items-center gap-2"><input type="checkbox" checked={form[key]} onChange={e=>update(key,e.target.checked)} className="size-4 accent-[#397caf]"/> {label}</label>)}</div></>}
+    {action==='status'&&<><Field label="สถานะห้อง"><select value={form.roomStatus} onChange={e=>update('roomStatus',e.target.value)} className={fieldClass}><option value="damaged">ห้องชำรุด</option><option value="unavailable">ไม่พร้อมใช้งาน</option><option value="vacant">คืนเป็นห้องว่าง (ต้องตรวจความพร้อมอีกครั้ง)</option></select></Field><Field label="เหตุผล"><input required={['damaged','unavailable'].includes(form.roomStatus)} value={form.reason} onChange={e=>update('reason',e.target.value)} className={fieldClass} placeholder="ระบุสาเหตุเพื่อป้องกันการจองซ้ำ"/></Field></>}
   </div><button disabled={saving || (action==='readiness'&&form.ready&&!['cleanliness','electricity','water','furniture'].every(key=>form[key]))} className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#f5bf3c] py-3 text-xs font-semibold text-[#173653] shadow-[0_3px_0_#c28d15] disabled:opacity-60">{saving&&<LoaderCircle size={15} className="animate-spin"/>} บันทึก{title}</button></form>
 }
 
