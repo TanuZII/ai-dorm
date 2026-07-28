@@ -6,7 +6,7 @@ import { createApp } from '../src/app.js'
 
 test('critical dormitory backend flows', async (t) => {
   const db = createDb(':memory:')
-  const server = createApp({ db }).listen(0, '127.0.0.1')
+  const server = createApp({ db, integrations: { studentDirectory: { lookup: async studentId => ({ studentCode: studentId, title: 'นางสาว', firstName: 'ข้อมูล', lastName: 'จากระบบการศึกษา', nationalId: '1101700000001', email: 'directory@example.test', phone: '0811111111', currentAddress: 'สุพรรณบุรี', faculty: 'คณะครุศาสตร์', program: 'ศึกษาศาสตรบัณฑิต', major: 'การศึกษาปฐมวัย' }) } } }).listen(0, '127.0.0.1')
   await new Promise(resolve => server.once('listening', resolve))
   const base = `http://127.0.0.1:${server.address().port}/api`
   let token = ''
@@ -141,7 +141,10 @@ test('critical dormitory backend flows', async (t) => {
 
   let tenantId
   await t.test('create tenant and portal account with password policy', async () => {
-    const created = await api('/tenants', { method: 'POST', body: { tenantCode: 'ST690001', tenantType: 'student', tenantTypeCode: 'STUDENT', firstName: 'สมหญิง', lastName: 'เรียนดี', email: 'student@example.test', currentAddress: 'มหาวิทยาลัยตัวอย่าง' } })
+    const directory = await api('/integrations/students/690001')
+    assert.equal(directory.response.status, 200)
+    assert.equal(directory.body.firstName, 'ข้อมูล')
+    const created = await api('/tenants', { method: 'POST', body: { tenantCode: 'ST690001', tenantType: 'student', tenantTypeCode: 'STUDENT', firstName: 'สมหญิง', lastName: 'เรียนดี', nationalId: '1101700000001', email: 'student@example.test', phone: '0811111111', currentAddress: 'มหาวิทยาลัยตัวอย่าง', faculty: 'คณะครุศาสตร์', program: 'ศึกษาศาสตรบัณฑิต', major: 'การศึกษาปฐมวัย', lineId: 'student.line', guardianName: 'นาง สมใจ เรียนดี', guardianPhone: '0822222222', guardianEmail: 'guardian@example.test', guardianLineId: 'guardian.line' } })
     assert.equal(created.response.status, 201)
     assert.equal(created.body.tenant_type_code, 'STUDENT')
     tenantId = created.body.id
@@ -270,9 +273,17 @@ test('critical dormitory backend flows', async (t) => {
     assert.equal(occupied.response.status, 200)
     const missing = await api('/contracts/missing')
     assert.ok(missing.body.some(item => item.id === tenantId))
-    const contract = await api('/contracts', { method: 'POST', body: { contractNo: 'CT-690001', tenantId, bedId: firstBed.id, contractType: 'STUDENT_TERM', contractDate: '2026-07-30', rentalPeriod: 'term', startsAt: '2026-08-01', endsAt: '2026-12-31', advanceRent: 8000, minimumTermMonths: 4, depositAmount: 2000 } })
+    const otherTenant = await api('/tenants', { method: 'POST', body: { tenantCode: 'ST690002', tenantType: 'student', firstName: 'ผู้เช่า', lastName: 'คนอื่น' } })
+    const stolenBed = await api('/contracts', { method: 'POST', body: { contractNo: 'CT-STOLEN', tenantId: otherTenant.body.id, bedId: firstBed.id, contractType: 'STUDENT_TERM', contractDate: '2026-07-30', rentalPeriod: 'term', startsAt: '2026-08-01', endsAt: '2026-12-31', minimumTermMonths: 4 } })
+    assert.equal(stolenBed.response.status, 409)
+    assert.equal(stolenBed.body.error, 'BED_NOT_LOCKED_FOR_TENANT')
+    const contract = await api('/contracts', { method: 'POST', body: { contractNo: 'CT-690001', tenantId, bedId: firstBed.id, contractType: 'STUDENT_TERM', contractDate: '2026-07-30', rentalPeriod: 'term', startsAt: '2026-08-01', endsAt: '2026-12-31', advanceRent: 1, minimumTermMonths: 4, depositAmount: 1 } })
     assert.equal(contract.response.status, 201)
     assert.equal(contract.body.document_status, 'draft')
+    assert.equal(contract.body.status, 'contract_pending')
+    assert.equal(contract.body.advance_rent, 8000)
+    assert.equal(contract.body.deposit_amount, 2000)
+    assert.equal(contract.body.rate_policy_code, 'ST68_TERM')
     const sent = await api(`/contracts/${contract.body.id}/send`, { method: 'POST', body: {} })
     assert.equal(sent.response.status, 200)
     assert.equal(sent.body.email_status, 'queued')
@@ -319,7 +330,13 @@ test('critical dormitory backend flows', async (t) => {
     assert.ok(monthlyAlert.body.some(item => item.id === Number(monthlyAlertContract.lastInsertRowid) && item.alert_at === '2027-01-25'))
     const persistentMonthlyAlert = await api('/contracts/alerts?asOf=2027-02-01')
     assert.ok(persistentMonthlyAlert.body.some(item => item.id === Number(monthlyAlertContract.lastInsertRowid)))
+    const calendarMonthContract = db.prepare(`INSERT INTO leases(contract_no,tenant_id,bed_id,contract_type,contract_date,rental_period,starts_at,ends_at,document_status,status) VALUES ('CT-690-CALENDAR',?,?, 'STUDENT_TERM','2027-01-01','term','2027-01-01','2027-03-31','signed','active')`).run(tenantId,firstBed.id)
+    const beforeCalendarMonth = await api('/contracts/alerts?asOf=2027-02-27')
+    assert.ok(!beforeCalendarMonth.body.some(item => item.id === Number(calendarMonthContract.lastInsertRowid)))
+    const onCalendarMonth = await api('/contracts/alerts?asOf=2027-02-28')
+    assert.ok(onCalendarMonth.body.some(item => item.id === Number(calendarMonthContract.lastInsertRowid) && item.alert_at === '2027-02-28'))
     db.prepare(`UPDATE leases SET status='cancelled' WHERE id=?`).run(monthlyAlertContract.lastInsertRowid)
+    db.prepare(`UPDATE leases SET status='cancelled' WHERE id=?`).run(calendarMonthContract.lastInsertRowid)
     const immutable = await api(`/contracts/${contract.body.id}`, { method: 'PATCH', body: { endsAt: '2027-01-31' } })
     assert.equal(immutable.response.status, 409)
 
@@ -348,7 +365,15 @@ test('critical dormitory backend flows', async (t) => {
     ])
     assert.equal(db.prepare(`SELECT status FROM leases WHERE id=?`).get(contract.body.id).status, 'expired')
     token = adminLogin.body.token
-
+    const futureRate = await api('/rate-policies', { method: 'POST', body: { code: 'ST68_TERM_2571', name: 'นักศึกษา 68+ ภาคเรียน ปี 2571', tenantCohort: 'STUDENT_68_PLUS', rentalPeriod: 'term', rateScope: 'person', amount: 9000, occupancyLimit: 2, utilitySplitDivisor: 2, waterRate: 23, electricityRate: 7, depositAmount: 2000, dueDay: 5, lateFee: 100, delinquencyMonths: 2, startsAt: '2027-06-01', endsAt: null } })
+    assert.equal(futureRate.response.status, 201)
+    const nextRateRenewal = await api(`/contracts/${renewal.body.id}/renew`, { method: 'POST', body: { contractNo: 'CT-690001-R3', contractDate: '2027-05-01', rentalPeriod: 'term', startsAt: '2027-06-01', endsAt: '2027-10-31' } })
+    assert.equal(nextRateRenewal.response.status, 201)
+    assert.equal(nextRateRenewal.body.rate_policy_code, 'ST68_TERM_2571')
+    assert.equal(nextRateRenewal.body.advance_rent, 9000)
+    db.prepare(`DELETE FROM contract_documents WHERE lease_id=?`).run(nextRateRenewal.body.id)
+    db.prepare(`DELETE FROM contract_events WHERE lease_id=?`).run(nextRateRenewal.body.id)
+    db.prepare(`DELETE FROM leases WHERE id=?`).run(nextRateRenewal.body.id)
     const afterReserve = await api('/beds?availability=available&bedCount=2')
     const target = afterReserve.body.find(x => x.room_id !== firstBed.room_id)
     const moved = await api('/room-transfers', { method: 'POST', body: { tenantId, toBedId: target.id, transferDate: '2026-08-10', reason: 'ย้ายตามคำร้องของผู้พักอาศัย' } })
@@ -373,6 +398,49 @@ test('critical dormitory backend flows', async (t) => {
     const inspected = await api(`/rooms/${target.room_id}/readiness`, { method: 'POST', body: { ready: true, checklist: { cleanliness: true, electricity: true, water: true, furniture: true } } })
     assert.equal(inspected.response.status, 200)
     assert.equal(inspected.body.readiness_status, 'ready')
+  })
+
+  await t.test('staff and external tenants complete real contract signing flows from phase-one rates', async () => {
+    const adminLogin = await api('/auth/login', { method: 'POST', body: { username: 'admin', password: 'Admin@1234' } })
+    token = adminLogin.body.token
+    const cases = [
+      { tenantCode: 'SF690001', tenantType: 'staff', firstName: 'สมชาย', lastName: 'บุคลากร', organization: 'กองอาคารสถานที่', scope: 'bed', contractType: 'STAFF_MONTH', username: 'staff690001', password: 'Staff@1234', expectedRent: 2000, expectedTotal: 4000 },
+      { tenantCode: 'EX690001', tenantType: 'external', firstName: 'สมศรี', lastName: 'ภายนอก', organization: 'บริษัท ทดสอบ จำกัด', scope: 'room', contractType: 'EXTERNAL_MONTH', username: 'external690001', password: 'External@1234', expectedRent: 5000, expectedTotal: 7000 },
+    ]
+
+    for (const item of cases) {
+      const tenant = await api('/tenants', { method: 'POST', body: { tenantCode: item.tenantCode, tenantType: item.tenantType, firstName: item.firstName, lastName: item.lastName, nationalId: item.tenantType === 'staff' ? '1101700000002' : '1101700000003', email: `${item.username}@example.test`, phone: '0833333333', currentAddress: 'สุพรรณบุรี', organization: item.organization, emergencyContactName: 'ผู้ติดต่อฉุกเฉิน', emergencyContactPhone: '0844444444', emergencyContactRelation: 'ญาติ', legalEntity: item.tenantType === 'external' } })
+      assert.equal(tenant.response.status, 201)
+      const spaces = item.scope === 'room' ? await api('/rooms?availability=vacant&bedCount=2') : await api('/beds?availability=available&bedCount=2')
+      const bed = item.scope === 'room' ? db.prepare(`SELECT b.id,r.id room_id FROM beds b JOIN rooms r ON r.id=b.room_id WHERE r.id=? ORDER BY b.id LIMIT 1`).get(spaces.body[0].id) : spaces.body[0]
+      const reservation = await api('/reservations', { method: 'POST', body: { tenantId: tenant.body.id, scope: item.scope, rentalPeriod: 'monthly', roomId: bed.room_id, bedId: item.scope === 'bed' ? bed.id : null, startsAt: '2026-09-01', endsAt: '2026-09-30' } })
+      assert.equal(reservation.response.status, 201)
+      const tenantBed = db.prepare(`SELECT id FROM beds WHERE room_id=? AND tenant_id=? ORDER BY id LIMIT 1`).get(bed.room_id, tenant.body.id)
+      await api(`/beds/${tenantBed.id}/status`, { method: 'PATCH', body: { status: 'occupied', tenantId: tenant.body.id } })
+      if (item.tenantType === 'external') {
+        const withoutCertificate = await api('/contracts', { method: 'POST', body: { contractNo: 'CT-EX-NO-CERT', tenantId: tenant.body.id, bedId: tenantBed.id, contractType: item.contractType, contractDate: '2026-08-25', rentalPeriod: 'monthly', startsAt: '2026-09-01', endsAt: '2026-09-30', minimumTermMonths: 1 } })
+        assert.equal(withoutCertificate.response.status, 409)
+        assert.equal(withoutCertificate.body.error, 'COMPANY_CERTIFICATE_REQUIRED')
+        const certificate = await api(`/tenants/${tenant.body.id}/documents`, { method: 'POST', body: { documentType: 'company_certificate', filename: 'company.pdf', mimeType: 'application/pdf', base64: Buffer.from('%PDF-company-certificate').toString('base64') } })
+        assert.equal(certificate.response.status, 201)
+      }
+      const account = await api(`/tenants/${tenant.body.id}/portal-account`, { method: 'POST', body: { username: item.username, password: item.password } })
+      assert.equal(account.response.status, 201)
+      const contract = await api('/contracts', { method: 'POST', body: { contractNo: `CT-${item.tenantCode}`, tenantId: tenant.body.id, bedId: tenantBed.id, contractType: item.contractType, contractDate: '2026-08-25', rentalPeriod: 'monthly', startsAt: '2026-09-01', endsAt: '2026-09-30', advanceRent: 1, minimumTermMonths: 1, depositAmount: 1 } })
+      assert.equal(contract.response.status, 201)
+      assert.equal(contract.body.advance_rent, item.expectedRent)
+      assert.equal(contract.body.deposit_amount, 2000)
+      const sent = await api(`/contracts/${contract.body.id}/send`, { method: 'POST', body: {} })
+      assert.equal(sent.response.status, 200)
+      const login = await api('/auth/login', { method: 'POST', body: { username: item.username, password: item.password } })
+      token = login.body.token
+      const signed = await api(`/contracts/${contract.body.id}/sign`, { method: 'POST', body: { password: item.password, confirmed: true } })
+      assert.equal(signed.response.status, 200)
+      assert.equal(signed.body.document_status, 'signed')
+      assert.equal(db.prepare(`SELECT total FROM invoices WHERE contract_id=?`).get(contract.body.id).total, item.expectedTotal)
+      assert.equal(db.prepare(`SELECT COUNT(*) count FROM contract_documents WHERE lease_id=? AND document_state='signed'`).get(contract.body.id).count, 1)
+      token = adminLogin.body.token
+    }
   })
 
   let inventoryItemId
@@ -466,10 +534,17 @@ test('critical dormitory backend flows', async (t) => {
     await api(`/beds/${bed.id}/status`, { method: 'PATCH', body: { status: 'occupied', tenantId: tenantIdForCheckout } })
     const contract = await api('/contracts', { method: 'POST', body: { contractNo: 'CT-690099', tenantId: tenantIdForCheckout, bedId: bed.id, contractType: 'STUDENT_TERM', contractDate: '2026-08-30', rentalPeriod: 'term', startsAt: '2026-09-01', endsAt: '2026-12-31', advanceRent: 8000, minimumTermMonths: 4, depositAmount: 2000 } })
     assert.equal(contract.response.status, 201)
-
+    await api(`/contracts/${contract.body.id}/send`, { method: 'POST', body: {} })
     const tenantLogin = await api('/auth/login', { method: 'POST', body: { username: 'checkout99', password: 'Checkout@123' } })
     token = tenantLogin.body.token
     assert.ok(tenantLogin.body.user.permissions.includes('checkouts.create'))
+    const signedContract = await api(`/contracts/${contract.body.id}/sign`, { method: 'POST', body: { password: 'Checkout@123', confirmed: true } })
+    assert.equal(signedContract.response.status, 200)
+    token = adminLogin.body.token
+    const contractInvoice = db.prepare(`SELECT * FROM invoices WHERE contract_id=?`).get(contract.body.id)
+    const contractPayment = await api('/payments', { method: 'POST', body: { invoiceId: contractInvoice.id, amount: contractInvoice.total, method: 'transfer', referenceNo: 'CHECKOUT-CONTRACT-PAID' } })
+    assert.equal(contractPayment.response.status, 201)
+    token = tenantLogin.body.token
     const request = await api('/checkout-requests', { method: 'POST', body: { requestedCheckoutDate: '2026-12-20', reason: 'สำเร็จการศึกษาและเดินทางกลับภูมิลำเนา' } })
     assert.equal(request.response.status, 201)
     assert.equal(request.body.tenant_id, tenantIdForCheckout)
