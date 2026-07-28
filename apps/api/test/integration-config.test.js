@@ -101,7 +101,7 @@ test('closes the server and database when its listener fails to start', async ()
   assert.equal(databaseCloseCount, 1)
 })
 
-test('retries cleanup after server close fails without leaking the database', async () => {
+test('closes the database while preserving a server close failure', async () => {
   const closeError = new Error('close failed')
   let serverCloseCount = 0
   let databaseCloseCount = 0
@@ -125,9 +125,23 @@ test('retries cleanup after server close fails without leaking the database', as
   })
 
   await assert.rejects(() => harness.close(), closeError)
-  assert.equal(databaseCloseCount, 0)
-  await harness.close()
-
-  assert.equal(serverCloseCount, 2)
+  assert.equal(serverCloseCount, 1)
   assert.equal(databaseCloseCount, 1)
+})
+
+test('preserves the startup error when database cleanup also fails', async () => {
+  const startupError = new Error('create app failed')
+  const cleanupError = new Error('database close failed')
+  const db = { close: () => { throw cleanupError } }
+
+  const result = await startApiHarness({
+    factories: {
+      createDb: () => db,
+      createApp: () => { throw startupError },
+    },
+  }).then(harness => ({ harness }), error => ({ error }))
+  await result.harness?.close()
+
+  assert.equal(result.error, startupError)
+  assert.equal(result.error.cleanupError, cleanupError)
 })

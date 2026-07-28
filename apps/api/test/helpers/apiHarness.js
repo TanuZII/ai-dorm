@@ -30,10 +30,12 @@ export async function startApiHarness({ env = { NODE_ENV: 'test' }, integrations
       server.once('error', onError)
     })
   } catch (error) {
+    let cleanupError
     if (server) {
-      try { await closeServer(server) } catch {}
+      try { await closeServer(server) } catch (closeError) { cleanupError = closeError }
     }
-    db.close()
+    try { db.close() } catch (closeError) { cleanupError = closeError }
+    if (cleanupError && error && typeof error === 'object') error.cleanupError = cleanupError
     throw error
   }
 
@@ -67,14 +69,26 @@ export async function startApiHarness({ env = { NODE_ENV: 'test' }, integrations
     if (serverClosed && databaseClosed) return
     if (closing) return closing
     closing = (async () => {
-      if (!serverClosed) {
-        await closeServer(server)
-        serverClosed = true
+      let serverError
+      try {
+        if (!serverClosed) {
+          await closeServer(server)
+          serverClosed = true
+        }
+      } catch (error) {
+        serverError = error
+      } finally {
+        if (!databaseClosed) {
+          try {
+            db.close()
+            databaseClosed = true
+          } catch (databaseError) {
+            if (serverError) serverError.cleanupError = databaseError
+            else throw databaseError
+          }
+        }
       }
-      if (!databaseClosed) {
-        db.close()
-        databaseClosed = true
-      }
+      if (serverError) throw serverError
     })()
     try {
       await closing
