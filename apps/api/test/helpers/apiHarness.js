@@ -1,17 +1,41 @@
-import { createApp } from '../../src/app.js'
-import { createDb } from '../../src/db.js'
+import { createApp as defaultCreateApp } from '../../src/app.js'
+import { createDb as defaultCreateDb } from '../../src/db.js'
 import { assertSafeIntegrationConfig, readIntegrationConfig } from '../../src/integrations/config.js'
 
-export async function startApiHarness({ env = { NODE_ENV: 'test' }, integrations } = {}) {
+function closeServer(server) {
+  return new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+}
+
+export async function startApiHarness({ env = { NODE_ENV: 'test' }, integrations, factories = {} } = {}) {
   const integrationConfig = readIntegrationConfig(env)
   assertSafeIntegrationConfig(integrationConfig, env)
 
+  const createDb = factories.createDb || defaultCreateDb
+  const createApp = factories.createApp || defaultCreateApp
   const db = createDb(':memory:')
-  const server = createApp({ db, integrations, integrationConfig }).listen(0, '127.0.0.1')
-  await new Promise((resolve, reject) => {
-    server.once('listening', resolve)
-    server.once('error', reject)
-  })
+  let server
+  try {
+    const app = createApp({ db, integrations, integrationConfig })
+    server = app.listen(0, '127.0.0.1')
+    await new Promise((resolve, reject) => {
+      const onListening = () => {
+        server.off('error', onError)
+        resolve()
+      }
+      const onError = error => {
+        server.off('listening', onListening)
+        reject(error)
+      }
+      server.once('listening', onListening)
+      server.once('error', onError)
+    })
+  } catch (error) {
+    if (server) {
+      try { await closeServer(server) } catch {}
+    }
+    db.close()
+    throw error
+  }
 
   const base = `http://127.0.0.1:${server.address().port}/api`
   let token = ''
@@ -36,12 +60,27 @@ export async function startApiHarness({ env = { NODE_ENV: 'test' }, integrations
     return result
   }
 
-  let closed = false
+  let serverClosed = false
+  let databaseClosed = false
+  let closing
   async function close() {
-    if (closed) return
-    closed = true
-    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
-    db.close()
+    if (serverClosed && databaseClosed) return
+    if (closing) return closing
+    closing = (async () => {
+      if (!serverClosed) {
+        await closeServer(server)
+        serverClosed = true
+      }
+      if (!databaseClosed) {
+        db.close()
+        databaseClosed = true
+      }
+    })()
+    try {
+      await closing
+    } finally {
+      closing = undefined
+    }
   }
 
   return { db, base, api, login, close }
