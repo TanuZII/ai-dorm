@@ -87,10 +87,13 @@ function remittanceRows(db, query) {
   const { from, to } = dateRange(query)
   const paid = db.prepare(`SELECT ii.item_type,rp.code policy_code,rp.revenue_group,rp.revenue_name revenue_type,rp.reclaim_rate,rp.university_rate,ROUND(SUM(ii.amount*(p.amount/i.total)),2) amount
     FROM payments p JOIN receipts r ON r.payment_id=p.id JOIN invoices i ON i.id=p.invoice_id JOIN invoice_items ii ON ii.invoice_id=i.id
-    LEFT JOIN revenue_share_policies rp ON rp.id=(SELECT policy.id FROM revenue_share_policies policy WHERE policy.item_type=ii.item_type AND date(p.paid_at)>=date(policy.starts_at) AND (policy.ends_at IS NULL OR date(p.paid_at)<=date(policy.ends_at)) ORDER BY policy.starts_at DESC,policy.id DESC LIMIT 1)
+    LEFT JOIN revenue_share_policies rp ON rp.id=(SELECT policy.id FROM revenue_share_policies policy WHERE policy.item_type=ii.item_type AND (policy.active=1 OR policy.ends_at IS NOT NULL) AND date(p.paid_at)>=date(policy.starts_at) AND (policy.ends_at IS NULL OR date(p.paid_at)<=date(policy.ends_at)) ORDER BY policy.starts_at DESC,policy.id DESC LIMIT 1)
     WHERE r.status='issued' AND ii.item_type!='deposit' AND date(p.paid_at) BETWEEN ? AND ? GROUP BY ii.item_type,rp.id ORDER BY rp.revenue_group,rp.revenue_name`).all(from, to)
   const missing=paid.find(row=>!row.policy_code);if(missing)throw Object.assign(new Error(`ยังไม่ได้กำหนดสัดส่วนแบ่งรายได้สำหรับ ${missing.item_type}`),{status:409,code:'REVENUE_POLICY_NOT_CONFIGURED'})
-  return paid.map(row => ({ policy_code:row.policy_code,revenue_group:row.revenue_group,revenue_type:row.revenue_type,reclaim_percent:Number((row.reclaim_rate*100).toFixed(2)),university_percent:Number((row.university_rate*100).toFixed(2)),full_amount:row.amount,reclaim_amount:Number((row.amount*row.reclaim_rate).toFixed(2)),university_amount:Number((row.amount*row.university_rate).toFixed(2)) }))
+  return paid.map(row => {
+    const fullCents=Math.round(row.amount*100),reclaimCents=Math.round(fullCents*row.reclaim_rate),universityCents=fullCents-reclaimCents
+    return { policy_code:row.policy_code,revenue_group:row.revenue_group,revenue_type:row.revenue_type,reclaim_percent:Number((row.reclaim_rate*100).toFixed(2)),university_percent:Number((row.university_rate*100).toFixed(2)),full_amount:fullCents/100,reclaim_amount:reclaimCents/100,university_amount:universityCents/100 }
+  })
 }
 
 export function buildReport(db, query = {}) {
